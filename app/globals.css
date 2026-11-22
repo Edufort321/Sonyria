@@ -286,3 +286,9 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .transport .play { width: 54px; height: 54px; }
 .tinfo { font-size: 11px; line-height: 1.35; }
 .tinfo b { font-size: 13px; }
+.lang-btn { display: flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--panel); padding: 0; height: 32px; }
+.lang-btn b { padding: 0 8px; display: grid; place-items: center; font-size: 11.5px; color: var(--dim); }
+.lang-btn b.on { background: var(--grad2); color: #fff; }
+.wlang { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); margin-bottom: 14px; }
+.wlang button { padding: 6px 14px; border-radius: 9px; font-size: 13px; color: var(--dim); }
+.wlang button.on { background: var(--grad2); color: #fff; }

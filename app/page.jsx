@@ -1,4 +1,5 @@
 'use client';
+import { tx, initLang, setLang, onLang, getLang } from '@/lib/i18n';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime } from '@/lib/engine';
@@ -20,6 +21,18 @@ Quand la ville s'endort
 Ta voix me guide encore
 Jusqu'au bout de la nuit`;
 
+const DEMO_EN = `[Verse]
+On the road tonight I walk without a sound
+City lights are dancing all around
+I keep your words deep inside my heart
+Every step brings me closer from the start
+
+[Chorus]
+And I sing for you
+When the city sleeps
+Your voice is guiding me
+To the end of the night`;
+
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const fxParams = (k) => { const { n, ...p } = VOICE_FX[k]; return { echoTime: '1/8.', fb: 0.3, ...p }; };
 const LEADS = { voix: 'Voix', synth: 'Synthé', flute: 'Flûte', piano: 'Piano' };
@@ -29,7 +42,7 @@ const TYPES = { verse: 'Couplet', chorus: 'Refrain', bridge: 'Pont' };
 
 function newSong(lyrics = DEMO) {
   const s = {
-    id: 's' + Date.now(), title: 'Ma chanson', artist: '', lyrics, blocks: [], style: 'pop', key: 0, mode: 'maj', bpm: 104, swing: 0,
+    id: 's' + Date.now(), title: tx('Ma chanson'), artist: '', lyrics, blocks: [], style: 'pop', key: 0, mode: 'maj', bpm: 104, swing: 0,
     drums: M.drumPreset('pop'), drumsOn: true, intro: true, leadSound: 'voix', chordSound: '', harmony: 'off', guide: true, metronome: false,
     variant: 0, fr: false, voicePitch: true,
     mix: { lead: 0.75, harm: 0.45, chords: 0.5, bass: 0.7, drums: 0.8, tracks: 1, master: 0.9, leadReverb: 0.25, leadEcho: 0.12, mute: {}, solo: {} },
@@ -82,6 +95,7 @@ export default function Page() {
   const [polish, setPolish] = useState(null);
   const [progress, setProgress] = useState('');
   const [splash, setSplash] = useState(true);
+  const [lang, setLangState] = useState('fr');
   const [me, setMeState] = useState(null);
   const setMe = (m) => { setMeState(m); saveMe(m); };
   const [range, setRange] = useState('all');
@@ -134,14 +148,16 @@ export default function Page() {
         const id = localStorage.getItem('sonyria-current');
         setCode(localStorage.getItem('sonyria-code') || '');
         setMeState(loadMe());
+        setLangState(initLang());
         if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
     if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator.serviceWorker.register('/sw.js').catch(() => {});
+    const off = onLang((l) => { setLangState(l); bump(); });
     const bip = (e) => { e.preventDefault(); setInstall(e); };
     window.addEventListener('beforeinstallprompt', bip);
-    return () => window.removeEventListener('beforeinstallprompt', bip);
+    return () => { off(); window.removeEventListener('beforeinstallprompt', bip); };
   }, []); // eslint-disable-line
 
   // horloge (karaoké, grille, position)
@@ -204,9 +220,9 @@ export default function Page() {
 
   // ---------- IA ----------
   const ai = async (task, payload) => {
-    const r = await fetch('/api/claude', { method: 'POST', headers: { 'content-type': 'application/json', 'x-access-code': code }, body: JSON.stringify({ task, payload }) });
+    const r = await fetch('/api/claude', { method: 'POST', headers: { 'content-type': 'application/json', 'x-access-code': code }, body: JSON.stringify({ task, payload: { ...payload, lang: getLang() } }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || 'Erreur du serveur IA');
+    if (!r.ok) throw new Error(j.error || tx('Erreur du serveur IA'));
     return j.data;
   };
   const aiAmbiances = async () => {
@@ -222,7 +238,7 @@ export default function Page() {
     setBusy('polish');
     try {
       const d = await ai('polish', { lyrics: song.lyrics });
-      if (!d.lyrics || d.lyrics.length < 10) throw new Error('Réponse vide');
+      if (!d.lyrics || d.lyrics.length < 10) throw new Error(tx('Réponse vide'));
       setPolish({ lyrics: String(d.lyrics).replace(/\\n/g, '\n'), changes: (d.changes || []).slice(0, 12), note: d.note || '' });
     } catch (e) { say(e.message); }
     setBusy('');
@@ -257,7 +273,7 @@ export default function Page() {
           n++;
         });
       });
-      setAiNote(d.note || ''); say(`Claude a composé ${n} ligne${n > 1 ? 's' : ''}`);
+      setAiNote(d.note || ''); say(tx('Claude a composé {n} ligne(s)', { n }));
       setTab('melodie');
     } catch (e) { say(e.message); }
     setBusy('');
@@ -280,7 +296,7 @@ export default function Page() {
   // ---------- enregistrement ----------
   const openMic = async () => {
     const e = await ensureAudio();
-    try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say('Micro refusé : autorise le micro pour Sonyria dans le navigateur.'); return null; }
+    try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say(tx('Micro refusé : autorise le micro pour Sonyria dans le navigateur.')); return null; }
   };
   const startRec = async () => {
     const e = await openMic(); if (!e) return;
@@ -304,8 +320,8 @@ export default function Page() {
       const nb = e.ctx.createBuffer(1, buffer.length - cut, buffer.sampleRate);
       nb.getChannelData(0).set(buffer.getChannelData(0).subarray(cut)); buffer = nb; st = 0;
     }
-    up((s) => s.tracks.push({ id: 't' + Date.now(), name: `Voix ${s.tracks.length + 1}`, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
-    say('Prise enregistrée');
+    up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Voix {n}', { n: s.tracks.length + 1 }), start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
+    say(tx('Prise enregistrée'));
   };
   const setVideoBg = (file) => {
     if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
@@ -318,31 +334,31 @@ export default function Page() {
     const e = await ensureAudio();
     setBusy('import');
     try {
-      setProgress('Lecture du fichier…');
+      setProgress(tx('Lecture du fichier…'));
       const buf = await e.ctx.decodeAudioData(await file.arrayBuffer());
       if (file.type.startsWith('video/')) setVideoBg(file);
-      setProgress('Séparation voix / instrumental…'); await new Promise((r) => setTimeout(r, 30));
+      setProgress(tx('Séparation voix / instrumental…')); await new Promise((r) => setTimeout(r, 30));
       const sep = separate(buf);
-      setProgress('Tempo, tonalité et accords…'); await new Promise((r) => setTimeout(r, 30));
+      setProgress(tx('Tempo, tonalité et accords…')); await new Promise((r) => setTimeout(r, 30));
       const A = analyzeMusic(sep.mono, sep.sr);
       const segs = await transcribe(sep.voice, sep.sr, setProgress);
-      setProgress('Reconstruction de la mélodie et du karaoké…'); await new Promise((r) => setTimeout(r, 30));
+      setProgress(tx('Reconstruction de la mélodie et du karaoké…')); await new Promise((r) => setTimeout(r, 30));
       const fresh = newSong('');
       fresh.title = file.name.replace(/\.[^.]+$/, '').slice(0, 40);
       buildSong(fresh, A, segs, sep.voice, sep.sr);
       fresh.style = A.bpm < 86 ? 'ballade' : A.bpm > 125 ? 'edm' : 'pop';
       fresh.drums = M.drumPreset(M.STYLES[fresh.style].drums); fresh.swing = 0;
-      mkTrack(fresh, 'Original', sep.mono, sep.sr, -A.phase, false);
-      if (sep.inst) mkTrack(fresh, 'Instrumental (voix retirée)', sep.inst, sep.sr, -A.phase, true);
-      if (sep.stereo) mkTrack(fresh, 'Voix (approx.)', sep.voice, sep.sr, -A.phase, true, 'studio');
+      mkTrack(fresh, tx('Original'), sep.mono, sep.sr, -A.phase, false);
+      if (sep.inst) mkTrack(fresh, tx('Instrumental (voix retirée)'), sep.inst, sep.sr, -A.phase, true);
+      if (sep.stereo) mkTrack(fresh, tx('Voix (approx.)'), sep.voice, sep.sr, -A.phase, true, 'studio');
       fresh.mix.mute = { lead: false, harm: false, chords: true, bass: true, drums: true };
       load(fresh);
       setTab('melodie');
-      say(`Chanson recréée : ${A.bpm} BPM, ${M.NOTE_FR[A.key]} ${A.mode === 'maj' ? 'majeur' : 'mineur'}, ${segs.length} phrases. Vérifie les paroles !`);
-    } catch (err) { say('Import impossible : ' + (err.message || err)); }
+      say(tx('Chanson recréée : {b} BPM, {k}, {n} phrases. Vérifie les paroles !', { b: A.bpm, k: `${(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[A.key]} ${tx(A.mode === 'maj' ? 'majeur' : 'mineur')}`, n: segs.length }));
+    } catch (err) { say(tx('Import impossible : ') + (err.message || err)); }
     setProgress(''); setBusy('');
   };
-  const detectTempo = (t) => { const b = M.detectBpm(t.data, t.sr); if (b) { up((s) => (s.bpm = b)); say(`Tempo détecté : ${b} BPM`); } else say('Tempo introuvable'); };
+  const detectTempo = (t) => { const b = M.detectBpm(t.data, t.sr); if (b) { up((s) => (s.bpm = b)); say(tx('Tempo détecté : {n} BPM', { n: b })); } else say(tx('Tempo introuvable')); };
   const importAudio = async (file) => {
     if (file.type.startsWith('video/')) setVideoBg(file);
     const e = await ensureAudio();
@@ -353,7 +369,7 @@ export default function Page() {
       const d = mono.getChannelData(0);
       for (let c = 0; c < b.numberOfChannels; c++) { const x = b.getChannelData(c); for (let i = 0; i < x.length; i++) d[i] += x[i] / b.numberOfChannels; }
       up((s) => s.tracks.push({ id: 't' + Date.now(), name: file.name.replace(/\.[^.]+$/, '').slice(0, 24), start: 0, buffer: mono, data: d, sr: mono.sampleRate, vol: 0.9, pan: 0, fx: 'naturel', ...fxParams('naturel'), mute: false, solo: false }));
-    } catch (err) { say('Fichier audio illisible'); }
+    } catch (err) { say(tx('Fichier audio illisible')); }
   };
   const tr = (id, fn) => up((s) => { const t = s.tracks.find((x) => x.id === id); if (t) fn(t); });
 
@@ -365,10 +381,10 @@ export default function Page() {
     const T = buildTimeline(song);
     const tStart = track.start, tEnd = track.start + data.length / sr;
     const scope = T.lines.filter((l) => { const a = l.syl[0] ? l.syl[0].g * d16 : null; return a !== null && a >= tStart - 1.5 && a < tEnd; });
-    if (!scope.length) return say('Aucune ligne des paroles ne tombe pendant cette prise.');
+    if (!scope.length) return say(tx('Aucune ligne des paroles ne tombe pendant cette prise.'));
     const need = scope.reduce((a, l) => a + l.syl.length, 0);
     let on = M.detectOnsets(data, sr).onsets.map((o) => ({ t: o.t + tStart, s: o.s }));
-    if (on.length < Math.min(3, need)) return say('Voix trop faible : rapproche-toi du micro et réessaie.');
+    if (on.length < Math.min(3, need)) return say(tx('Voix trop faible : rapproche-toi du micro et réessaie.'));
     while (on.length > need) { let wi = 0; on.forEach((o, i) => { if (o.s < on[wi].s) wi = i; }); on.splice(wi, 1); }
     while (on.length < need) {
       if (on.length < 2) { on.push({ t: (on[0]?.t ?? tStart) + 0.3, s: 0 }); continue; }
@@ -414,7 +430,7 @@ export default function Page() {
         B += bars;
       });
     });
-    say(`Karaoké calé sur ta voix : ${need} syllabes sur ${scope.length} ligne${scope.length > 1 ? 's' : ''}`);
+    say(tx('Karaoké calé sur ta voix : {n} syllabes sur {l} ligne(s)', { n: need, l: scope.length }));
   };
 
   // ---------- export ----------
@@ -425,13 +441,13 @@ export default function Page() {
   };
   const exportWav = async () => {
     setExporting('wav');
-    try { await ensureAudio(); const buf = await renderOffline(song); saveBlob(wavBlob(buf), slug() + '.wav'); say('WAV exporté'); } catch (e) { say('Export impossible : ' + e.message); }
+    try { await ensureAudio(); const buf = await renderOffline(song); saveBlob(wavBlob(buf), slug() + '.wav'); say(tx('WAV exporté')); } catch (e) { say(tx('Export impossible : ') + e.message); }
     setExporting('');
   };
   const exportLive = async (video) => {
     const e = await ensureAudio();
     const mime = pickMime(video);
-    if (mime === null) return say('Ton navigateur ne permet pas l’export vidéo. Essaie Chrome.');
+    if (mime === null) return say(tx('Ton navigateur ne permet pas l’export vidéo. Essaie Chrome.'));
     let stream;
     const as = e.streamDest().stream;
     if (video) {
@@ -445,7 +461,7 @@ export default function Page() {
       const type = mr.mimeType || mime || 'video/webm';
       const ext = type.includes('mp4') ? (video ? 'mp4' : 'm4a') : 'webm';
       saveBlob(new Blob(chunks, { type }), `${slug()}${video ? '-clip' : ''}.${ext}`);
-      setExporting(''); say(ext === 'webm' ? 'Exporté en WebM (ton navigateur ne gère pas le MP4)' : `Exporté en ${ext.toUpperCase()}`);
+      setExporting(''); say(ext === 'webm' ? tx('Exporté en WebM (ton navigateur ne gère pas le MP4)') : tx('Exporté en {f}', { f: ext.toUpperCase() }));
     };
     setExporting(video ? 'clip' : 'mp4');
     mr.start(500);
@@ -493,7 +509,7 @@ export default function Page() {
       const sc = { title: d.title || song.title, theme: THEMES[d.theme] ? d.theme : 'neon', palette: okPal(d.palette) ? d.palette : null, textStyle: d.textStyle === 'bounce' ? 'bounce' : 'karaoke', keywords: (d.keywords || []).slice(0, 6).map(String), sections: {} };
       Object.entries(d.sections || {}).forEach(([k, x]) => { sc.sections[k] = { theme: THEMES[x.theme] ? x.theme : undefined, palette: okPal(x.palette) ? x.palette : undefined, intensity: clamp(+x.intensity || 0.7, 0.2, 1), keywords: (x.keywords || []).slice(0, 4).map(String) }; });
       up((s) => { s.clip.scenario = sc; });
-      setAiNote(d.note || ''); say('Scénario du clip prêt');
+      setAiNote(d.note || ''); say(tx('Scénario du clip prêt'));
     } catch (e) { say(e.message); }
     setBusy('');
   };
@@ -505,9 +521,9 @@ export default function Page() {
   };
   const copySheet = async () => {
     const txt = song.blocks.map((b) => `[${b.label}]\n` + b.lines.map((l) => `| ${l.chords.map((c) => M.chordName(c, song.key, song.mode, song.fr)).join(' | ')} |  ${l.text}`).join('\n')).join('\n\n');
-    try { await navigator.clipboard.writeText(`${song.title} — ${M.STYLES[song.style].n}, ${M.NOTE_FR[song.key]} ${song.mode === 'maj' ? 'majeur' : 'mineur'}, ${song.bpm} BPM\n\n${txt}`); say('Grille d’accords copiée'); } catch (e) { say('Copie impossible'); }
+    try { await navigator.clipboard.writeText(`${song.title} — ${tx(M.STYLES[song.style].n)}, ${(song.fr ? M.NOTE_FR : M.NOTE_EN)[song.key]} ${tx(song.mode === 'maj' ? 'majeur' : 'mineur')}, ${song.bpm} BPM\n\n${txt}`); say(tx('Grille d’accords copiée')); } catch (e) { say(tx('Copie impossible')); }
   };
-  const keyLabel = `${(song.fr ? M.NOTE_FR : M.NOTE_EN)[song.key]} ${song.mode === 'maj' ? 'maj' : 'min'}`;
+  const keyLabel = `${(song.fr ? M.NOTE_FR : M.NOTE_EN)[song.key]} ${tx(song.mode === 'maj' ? 'maj' : 'min')}`;
   const nm = (m) => M.midiName(m, song.fr);
   const posLabel = clock && !clock.countIn ? `M${Math.floor(clock.step / 16) + 1}.${Math.floor((clock.step % 16) / 4) + 1}` : '—';
 
@@ -517,122 +533,123 @@ export default function Page() {
     <div className="app">
       <IconDefs />
       {splash && <Splash onDone={() => setSplash(false)} />}
-      {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} install={install} onInstall={async () => { install.prompt(); await install.userChoice; setInstall(null); }}
+      {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={async () => { install.prompt(); await install.userChoice; setInstall(null); }}
         onFinish={(choice) => {
           setMe({ ...me, onboarded: true });
           if (choice === 'paroles') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('paroles'); }
           else if (choice === 'import') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('studio'); }
-          else { up((s) => { if (!s.artist) s.artist = me.artist || me.name || ''; }); setTab('melodie'); }
+          else { const n = newSong(getLang() === 'en' ? DEMO_EN : DEMO); n.artist = me.artist || me.name || ''; load(n); setTab('melodie'); }
         }} />}
       <header className="hdr">
         <img src="/logo.png" alt="Sonyria" />
-        <div className="brand">Sonyria<small>{me?.name ? `Salut, ${me.name}` : 'Studio de chansons'}</small></div>
+        <div className="brand">Sonyria<small>{me?.name ? tx('Salut, {n}', { n: me.name }) : tx('Studio de chansons')}</small></div>
         <div className="sp" />
-        {install && <button className="install" onClick={async () => { install.prompt(); await install.userChoice; setInstall(null); }}>Installer</button>}
-        {me?.av && <button className="avatar-btn" onClick={() => setSheet({ type: 'profile' })} title="Mon profil"><img src={avSrc(me.av)} alt="" /></button>}
-        <button className="icon-btn" onClick={() => setSheet({ type: 'songs' })} title="Mes chansons"><Ico n="folder" s={30} /></button>
-        <button className="icon-btn" onClick={() => setSheet({ type: 'settings' })} title="Réglages"><Ico n="settings" s={30} /></button>
+        {install && <button className="install" onClick={async () => { install.prompt(); await install.userChoice; setInstall(null); }}>{tx("Installer")}</button>}
+        <button className="lang-btn" onClick={() => setLang(lang === 'fr' ? 'en' : 'fr')} title="Français / English"><b className={lang === 'fr' ? 'on' : ''}>FR</b><b className={lang === 'en' ? 'on' : ''}>EN</b></button>
+        {me?.av && <button className="avatar-btn" onClick={() => setSheet({ type: 'profile' })} title={tx("Mon profil")}><img src={avSrc(me.av)} alt="" /></button>}
+        <button className="icon-btn" onClick={() => setSheet({ type: 'songs' })} title={tx("Mes chansons")}><Ico n="folder" s={30} /></button>
+        <button className="icon-btn" onClick={() => setSheet({ type: 'settings' })} title={tx("Réglages")}><Ico n="settings" s={30} /></button>
       </header>
 
       <nav className="tabs">
-        {TABS.map(([k, e, n]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}><span><Ico n={e} s={30} dim={tab !== k} /></span>{n}</button>)}
+        {TABS.map(([k, e, n]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}><span><Ico n={e} s={30} dim={tab !== k} /></span>{tx(n)}</button>)}
       </nav>
 
       {/* ================= PAROLES ================= */}
       {tab === 'paroles' && <>
         <div className="card">
           <div className="row nw">
-            <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder="Titre de la chanson" />
-            <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder="Artiste" style={{ maxWidth: 160 }} />
+            <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder={tx("Titre de la chanson")} />
+            <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder={tx("Artiste")} style={{ maxWidth: 160 }} />
           </div>
-          <label className="f">Tes paroles</label>
-          <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder="Colle ton texte ici…" />
-          <div className="hint">Astuce : écris <b>[Refrain]</b>, <b>[Couplet]</b> ou <b>[Pont]</b> au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête : <b>[Pont (tout doucement)]</b>, <b>[Refrain (plus puissant)]</b>, <b>(très émouvant)</b>. Pour forcer un découpage de syllabe : <b>chan/tent</b>.</div>
+          <label className="f">{tx("Tes paroles")}</label>
+          <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
+          <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <><span className="busy" /> Correction…</> : <><Ic n="wand" /> Corriger et adapter avec Claude</>}</button>
-            {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> Revenir à mon original</button>}
+            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <><span className="busy" /> {tx("Correction…")}</> : <><Ic n="wand" /> {tx("Corriger et adapter avec Claude")}</>}</button>
+            {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
-            <h3><Ico n="ai" s={28} /> Version corrigée</h3>
+            <h3><Ico n="ai" s={28} /> {tx("Version corrigée")}</h3>
             {polish.note && <div className="hint">{polish.note}</div>}
             {polish.changes.length > 0 && <div style={{ margin: '8px 0' }}>{polish.changes.map((c, i) => <div key={i} className="hint" style={{ marginBottom: 6 }}><s>{c.avant}</s><br /><b style={{ color: 'var(--txt)' }}>→ {c.apres}</b> <i>({c.pourquoi})</i></div>)}</div>}
             <textarea value={polish.lyrics} onChange={(e) => setPolish({ ...polish, lyrics: e.target.value })} style={{ minHeight: 180 }} />
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn pri" onClick={() => { const orig = song.lyricsOriginal || song.lyrics; up((s) => (s.lyricsOriginal = orig)); analyze(polish.lyrics); setPolish(null); say('Nouvelle version appliquée — ton original est gardé'); }}><Ic n="check" /> Utiliser cette version</button>
-              <button className="btn" onClick={() => setPolish(null)}>Garder la mienne</button>
+              <button className="btn pri" onClick={() => { const orig = song.lyricsOriginal || song.lyrics; up((s) => (s.lyricsOriginal = orig)); analyze(polish.lyrics); setPolish(null); say(tx('Nouvelle version appliquée — ton original est gardé')); }}><Ic n="check" /> {tx("Utiliser cette version")}</button>
+              <button className="btn" onClick={() => setPolish(null)}>{tx("Garder la mienne")}</button>
             </div>
           </div>}
-          <div className="hint" style={{ marginTop: 6 }}>{flat(song).length} lignes · {flat(song).reduce((a, x) => a + x.l.syls.length, 0)} syllabes · {song.blocks.length} sections</div>
+          <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })}</div>
         </div>
 
         <div className="card">
-          <h3><Ico n="headphones-wave" s={28} /> Ambiances proposées<span className="sp" />
-            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <span className="busy" /> : <Ic n="sparkles" />} Demander à Claude</button>
+          <h3><Ico n="headphones-wave" s={28} /> {tx("Ambiances proposées")}<span className="sp" />
+            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Demander à Claude')}</button>
           </h3>
           <div className="amb">
             {amb.map((a, i) => (
               <button key={i} className={'amb-c' + (ambSel === i ? ' on' : '')} onClick={() => chooseAmb(a, i)}>
-                <div className="t"><Ico n={M.STYLES[a.style].e} s={26} /> {M.STYLES[a.style].n}</div>
-                <div className="m">{a.bpm} BPM · {M.NOTE_FR[a.key]} {a.mode === 'maj' ? 'majeur' : 'mineur'}</div>
-                <div className="w">{a.why}</div>
+                <div className="t"><Ico n={M.STYLES[a.style].e} s={26} /> {tx(M.STYLES[a.style].n)}</div>
+                <div className="m">{a.bpm} BPM · {(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[a.key]} {tx(a.mode === 'maj' ? 'majeur' : 'mineur')}</div>
+                <div className="w">{a.ai ? a.why : a.why.split(' · ').map((x, i) => (i ? tx(' · ' + x) : tx(x))).join('')}</div>
               </button>
             ))}
           </div>
-          <div className="hint" style={{ marginTop: 8 }}>Touche une ambiance : tout est réarrangé et tu entends un extrait.</div>
+          <div className="hint" style={{ marginTop: 8 }}>{tx("Touche une ambiance : tout est réarrangé et tu entends un extrait.")}</div>
         </div>
 
         <div className="card">
           <h3><Ico n="note-purple" s={28} /> Style</h3>
           <div className="styles">
             {Object.entries(M.STYLES).map(([k, s]) => (
-              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { applyStyle(x, k); M.composeSong(x, x.variant); })}><b><Ico n={s.e} s={40} /></b>{s.n}</button>
+              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { applyStyle(x, k); M.composeSong(x, x.variant); })}><b><Ico n={s.e} s={40} /></b>{tx(s.n)}</button>
             ))}
           </div>
           <div className="row" style={{ marginTop: 12 }}>
-            <div className="grow"><label className="f">Tonalité</label>
+            <div className="grow"><label className="f">{tx("Tonalité")}</label>
               <select value={song.key} onChange={(e) => up((s) => (s.key = +e.target.value))}>{M.NOTE_FR.map((n, i) => <option key={i} value={i}>{n} / {M.NOTE_EN[i]}</option>)}</select></div>
             <div className="grow"><label className="f">Mode</label>
-              <div className="chips">{[['maj', 'Majeur', 'sun'], ['min', 'Mineur', 'moon']].map(([k, n, ic]) => <button key={k} className={'chip' + (song.mode === k ? ' on' : '')} onClick={() => up((s) => { s.mode = k; M.composeSong(s, s.variant); })}><Ic n={ic} size={14} /> {n}</button>)}</div></div>
+              <div className="chips">{[['maj', 'Majeur', 'sun'], ['min', 'Mineur', 'moon']].map(([k, n, ic]) => <button key={k} className={'chip' + (song.mode === k ? ' on' : '')} onClick={() => up((s) => { s.mode = k; M.composeSong(s, s.variant); })}><Ic n={ic} size={14} /> {tx(n)}</button>)}</div></div>
           </div>
-          <label className="f">Tempo : {song.bpm} BPM</label>
+          <label className="f">{tx('Tempo : {n} BPM', { n: song.bpm })}</label>
           <div className="row nw"><input type="range" min="55" max="190" value={song.bpm} onChange={(e) => up((s) => (s.bpm = +e.target.value))} /><button className="btn sm" onClick={tapTempo}><Ic n="tap" /> Tap</button></div>
-          <div className="chips" style={{ marginTop: 6 }}>{[[0.8, 'Plus lent'], [1, 'Original'], [1.15, 'Plus rapide']].map(([f, n]) => <button key={n} className="chip" onClick={() => up((s) => (s.bpm = clamp(Math.round(M.STYLES[s.style].bpm * f), 55, 190)))}>{n}</button>)}</div>
+          <div className="chips" style={{ marginTop: 6 }}>{[[0.8, 'Plus lent'], [1, 'Original'], [1.15, 'Plus rapide']].map(([f, n]) => <button key={n} className="chip" onClick={() => up((s) => (s.bpm = clamp(Math.round(M.STYLES[s.style].bpm * f), 55, 190)))}>{tx(n)}</button>)}</div>
         </div>
 
         <div className="card">
-          <button className="btn pri wide" onClick={() => { setTab('melodie'); play({ from: 0 }); }}><Ic n="play" /> Écouter l’arrangement</button>
+          <button className="btn pri wide" onClick={() => { setTab('melodie'); play({ from: 0 }); }}><Ic n="play" /> {tx("Écouter l’arrangement")}</button>
           <div style={{ height: 8 }} />
-          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <><span className="busy" /> Claude compose…</> : <><Ic n="sparkles" /> Composer la mélodie avec Claude</>}</button>
-          <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> Laisser Claude choisir aussi le style, la tonalité et le tempo</label>
-          {aiStatus?.ai === false && <div className="hint">IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.</div>}
+          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <><span className="busy" /> {tx("Claude compose…")}</> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Claude")}</>}</button>
+          <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Claude choisir aussi le style, la tonalité et le tempo")}</label>
+          {aiStatus?.ai === false && <div className="hint">{tx("IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.")}</div>}
         </div>
       </>}
 
       {/* ================= MÉLODIE ================= */}
       {tab === 'melodie' && <>
         <div className="card">
-          <h3><Ico n="treble" s={28} /> Propositions de mélodie<span className="sp" /><button className="btn sm" onClick={copySheet}><Ic n="copy" /> Grille</button></h3>
+          <h3><Ico n="treble" s={28} /> {tx("Propositions de mélodie")}<span className="sp" /><button className="btn sm" onClick={copySheet}><Ic n="copy" /> {tx("Grille")}</button></h3>
           <div className="chips">
-            {[0, 1, 2, 3].map((n) => <button key={n} className={'chip' + (song.variant === n ? ' on' : '')} onClick={() => { up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}>Proposition {'ABCD'[n]}</button>)}
-            <button className="chip" onClick={() => { const n = 4 + Math.floor(Math.random() * 1000); up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}><Ic n="dice" /> Autre</button>
+            {[0, 1, 2, 3].map((n) => <button key={n} className={'chip' + (song.variant === n ? ' on' : '')} onClick={() => { up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}>{tx('Proposition {n}', { n: 'ABCD'[n] })}</button>)}
+            <button className="chip" onClick={() => { const n = 4 + Math.floor(Math.random() * 1000); up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}><Ic n="dice" /> {tx("Autre")}</button>
           </div>
           {aiNote && <div className="hint" style={{ marginTop: 8 }}><Ic n="sparkles" size={13} /> {aiNote}</div>}
           <div className="row" style={{ marginTop: 10 }}>
-            <div className="grow"><label className="f">Voix guide</label><select value={song.leadSound} onChange={(e) => up((s) => (s.leadSound = e.target.value))}>{Object.entries(LEADS).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></div>
-            <div className="grow"><label className="f">Accords</label><select value={song.chordSound || ''} onChange={(e) => up((s) => (s.chordSound = e.target.value))}>{Object.entries(CHORDS).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></div>
-            <div className="grow"><label className="f">Harmonie vocale</label><select value={song.harmony} onChange={(e) => up((s) => (s.harmony = e.target.value))}>{Object.entries(HARMS).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></div>
+            <div className="grow"><label className="f">{tx("Voix guide")}</label><select value={song.leadSound} onChange={(e) => up((s) => (s.leadSound = e.target.value))}>{Object.entries(LEADS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
+            <div className="grow"><label className="f">{tx("Accords")}</label><select value={song.chordSound || ''} onChange={(e) => up((s) => (s.chordSound = e.target.value))}>{Object.entries(CHORDS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
+            <div className="grow"><label className="f">{tx("Harmonie vocale")}</label><select value={song.harmony} onChange={(e) => up((s) => (s.harmony = e.target.value))}>{Object.entries(HARMS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
           </div>
           <div className="chips" style={{ marginTop: 8 }}>
             <button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button>
-            <button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>Do Ré Mi</button>
+            <button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>{tx("Do Ré Mi")}</button>
           </div>
         </div>
 
         {song.blocks.map((b, bi) => (
           <div key={bi}>
             <div className="sec-h">
-              <button className={'sec-tag ' + b.type} onClick={() => up((s) => { const o = ['verse', 'chorus', 'bridge']; s.blocks[bi].type = o[(o.indexOf(b.type) + 1) % 3]; M.composeSong(s, s.variant); })}>{b.label.toLowerCase().startsWith(TYPES[b.type].toLowerCase()) ? b.label : `${b.label} · ${TYPES[b.type]}`}</button>
-              <button className="chip" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => up((s) => { const o = ['soft', 'emo', 'normal', 'loud']; s.blocks[bi].dyn = o[(o.indexOf(b.dyn || 'normal') + 1) % 4]; })}><Ic size={12} n={{ soft: 'feather', emo: 'drop', normal: 'music', loud: 'flame' }[b.dyn || 'normal']} /> {M.DYN_LABEL[b.dyn || 'normal']}</button>
+              <button className={'sec-tag ' + b.type} onClick={() => up((s) => { const o = ['verse', 'chorus', 'bridge']; s.blocks[bi].type = o[(o.indexOf(b.type) + 1) % 3]; M.composeSong(s, s.variant); })}>{(() => { const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); return lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`; })()}</button>
+              <button className="chip" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => up((s) => { const o = ['soft', 'emo', 'normal', 'loud']; s.blocks[bi].dyn = o[(o.indexOf(b.dyn || 'normal') + 1) % 4]; })}><Ic size={12} n={{ soft: 'feather', emo: 'drop', normal: 'music', loud: 'flame' }[b.dyn || 'normal']} /> {tx(M.DYN_LABEL[b.dyn || 'normal'])}</button>
               <span className="sp" style={{ flex: 1 }} />
               <button className="mini" onClick={() => { const L = tl.lines.filter((l) => l.bi === bi); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); }}><Ic n="play" size={15} fill="currentColor" /></button>
             </div>
@@ -643,9 +660,9 @@ export default function Page() {
                 <div key={li} className={'line' + (live ? ' live' : '')}>
                   <div className="line-act">
                     <span className="txt">{l.text}</span>
-                    {l.custom && <span className="badge">perso</span>}
+                    {l.custom && <span className="badge">{tx("perso")}</span>}
                     <button className="mini" onClick={() => L && play({ from: L.b0, to: L.b0 + L.bars })}><Ic n="play" size={15} fill="currentColor" /></button>
-                    <button className="mini" onClick={() => up((s) => { M.regenLine(s, bi, li, Math.floor(Math.random() * 1e6)); s.blocks[bi].lines[li].custom = true; })} aria-label="Nouvelle mélodie"><Ic n="dice" size={15} /></button>
+                    <button className="mini" onClick={() => up((s) => { M.regenLine(s, bi, li, Math.floor(Math.random() * 1e6)); s.blocks[bi].lines[li].custom = true; })} aria-label={tx("Nouvelle mélodie")}><Ic n="dice" size={15} /></button>
                   </div>
                   <div className="chords">{(l.chords || []).map((c, ci) => <button key={ci} className="chord" onClick={() => setSheet({ type: 'chord', bi, li, ci })}>{M.chordName(c, song.key, song.mode, song.fr)}</button>)}</div>
                   <Roll line={l} song={song} sel={sel?.bi === bi && sel?.li === li ? sel.ni : -1} act={live ? clock.active.ni : -1} />
@@ -671,31 +688,31 @@ export default function Page() {
       {/* ================= BEAT ================= */}
       {tab === 'beat' && <>
         <div className="card">
-          <h3><Ico n="metronome" s={28} /> Tempo</h3>
+          <h3><Ico n="metronome" s={28} /> {tx("Tempo")}</h3>
           <div className="bpm">
             <button className="tbtn" onClick={() => up((s) => (s.bpm = clamp(s.bpm - 1, 50, 200)))}>−</button>
             <div className="v">{song.bpm}<small> BPM</small></div>
             <button className="tbtn" onClick={() => up((s) => (s.bpm = clamp(s.bpm + 1, 50, 200)))}>+</button>
-            <button className="btn sm" onClick={tapTempo}><Ic n="tap" /> Tap tempo</button>
+            <button className="btn sm" onClick={tapTempo}><Ic n="tap" /> {tx("Tap tempo")}</button>
           </div>
           <input type="range" min="50" max="200" value={song.bpm} onChange={(e) => up((s) => (s.bpm = +e.target.value))} />
-          <div className="sl"><span>Swing / groove</span><input type="range" min="0" max="0.7" step="0.05" value={song.swing} onChange={(e) => up((s) => (s.swing = +e.target.value))} /><output>{Math.round(song.swing * 100)}%</output></div>
+          <div className="sl"><span>{tx("Swing / groove")}</span><input type="range" min="0" max="0.7" step="0.05" value={song.swing} onChange={(e) => up((s) => (s.swing = +e.target.value))} /><output>{Math.round(song.swing * 100)}%</output></div>
           <div className="chips" style={{ marginTop: 6 }}>
-            <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}><Ic n="drum" size={14} /> Batterie</button>
-            <button className={'chip' + (song.metronome ? ' on' : '')} onClick={() => up((s) => (s.metronome = !s.metronome))}><Ic n="bell" size={14} /> Métronome</button>
-            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introBars = null; s.introChords = null; })}><Ic n="clap" size={14} /> Intro + fin</button>
+            <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}><Ic n="drum" size={14} /> {tx("Batterie")}</button>
+            <button className={'chip' + (song.metronome ? ' on' : '')} onClick={() => up((s) => (s.metronome = !s.metronome))}><Ic n="bell" size={14} /> {tx("Métronome")}</button>
+            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introBars = null; s.introChords = null; })}><Ic n="clap" size={14} /> {tx("Intro + fin")}</button>
           </div>
         </div>
 
         <div className="card">
-          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true })}><Ic n="loop" /> Boucle</button></h3>
+          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true })}><Ic n="loop" /> {tx("Boucle")}</button></h3>
           <div className="chips" style={{ marginBottom: 10 }}>
-            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => (s.drums = M.drumPreset(k)))}>{k === 'vide' ? <><Ic n="eraser" size={14} /> Vide</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {M.STYLES[k]?.n || k}</>}</button>)}
+            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => (s.drums = M.drumPreset(k)))}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
           </div>
           <div className="grid">
             {M.DRUM_ROWS.map((r) => (
               <div key={r} style={{ display: 'contents' }}>
-                <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{M.DRUM_LABELS[r]}</button>
+                <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>
                 {song.drums[r].map((on, i) => (
                   <button key={i} className={'cell' + (Math.floor(i / 4) % 2 ? ' g' : '') + (on ? ' on' : '') + (r === 'kick' ? ' k' : r === 'hat' || r === 'open' ? ' h' : '') + (playing && clock && clock.step >= 0 && clock.step % 16 === i ? ' now' : '')}
                     onClick={async () => { up((s) => { s.drums[r][i] = s.drums[r][i] ? 0 : 1; }); if (!song.drums[r][i]) return; const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }} />
@@ -706,7 +723,7 @@ export default function Page() {
         </div>
 
         <div className="card">
-          <h3><Ico n="pad-grid" s={28} /> Pads en direct</h3>
+          <h3><Ico n="pad-grid" s={28} /> {tx("Pads en direct")}</h3>
           <div className="pads">
             {[['kick', 'Kick', 'drum'], ['snare', 'Snare', 'snare'], ['clap', 'Clap', 'clap'], ['hat', 'Hat', 'snap'], ['open', 'Open hat', 'cd']].map(([k, n, ic]) => <button key={k} className="pad" onPointerDown={async () => { const e = await ensureAudio(); e.drum(k, e.ctx.currentTime); }}><Ico n={ic} s={34} /><span>{n}</span></button>)}
             {[1, 4, 5, 6, 2, 3, 7].map((d) => <button key={d} className="pad" style={{ color: '#bfdbfe' }} onPointerDown={async () => { const e = await ensureAudio(); e.previewChord(song, d); }}><Ico n="piano" s={28} /><span>{M.chordName(d, song.key, song.mode, song.fr)}</span></button>)}
@@ -717,70 +734,70 @@ export default function Page() {
       {/* ================= STUDIO ================= */}
       {tab === 'studio' && <>
         <div className="card">
-          <h3><Ico n="studio-mic" s={30} /> Enregistrement</h3>
-          {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> Activer le micro</button> : <MicMeter eng={eng} />}
+          <h3><Ico n="studio-mic" s={30} /> {tx("Enregistrement")}</h3>
+          {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Activer le micro")}</button> : <MicMeter eng={eng} />}
           <div className="row" style={{ marginTop: 10 }}>
-            <div className="grow"><label className="f">Enregistrer à partir de</label>
+            <div className="grow"><label className="f">{tx("Enregistrer à partir de")}</label>
               <select value={recFrom} onChange={(e) => setRecFrom(+e.target.value)}>
-                <option value={0}>Début de la chanson</option>
+                <option value={0}>{tx("Début de la chanson")}</option>
                 {tl.lines.map((l, i) => <option key={i} value={l.b0}>{l.label} — {l.text.slice(0, 32)}</option>)}
               </select></div>
           </div>
           <div className="chips" style={{ marginTop: 8 }}>
-            <button className={'chip' + (song.countIn ? ' on' : '')} onClick={() => up((s) => (s.countIn = !s.countIn))}><Ic n="timer" size={14} /> Décompte 1 mesure</button>
-            <button className={'chip' + (song.karaRec ? ' on' : '')} onClick={() => up((s) => (s.karaRec = !s.karaRec))}><Ic n="vocal" size={14} /> Karaoké plein écran</button>
-            <button className={'chip' + (song.guide ? ' on' : '')} onClick={() => up((s) => (s.guide = !s.guide))}><Ic n="music" size={14} /> Mélodie guide</button>
-            <button className={'chip' + (song.echoCancel ? ' on' : '')} onClick={() => { up((s) => (s.echoCancel = !s.echoCancel)); setMicOn(false); }}><Ic n="noecho" size={14} /> Sans écouteurs</button>
+            <button className={'chip' + (song.countIn ? ' on' : '')} onClick={() => up((s) => (s.countIn = !s.countIn))}><Ic n="timer" size={14} /> {tx("Décompte 1 mesure")}</button>
+            <button className={'chip' + (song.karaRec ? ' on' : '')} onClick={() => up((s) => (s.karaRec = !s.karaRec))}><Ic n="vocal" size={14} /> {tx("Karaoké plein écran")}</button>
+            <button className={'chip' + (song.guide ? ' on' : '')} onClick={() => up((s) => (s.guide = !s.guide))}><Ic n="music" size={14} /> {tx("Mélodie guide")}</button>
+            <button className={'chip' + (song.echoCancel ? ' on' : '')} onClick={() => { up((s) => (s.echoCancel = !s.echoCancel)); setMicOn(false); }}><Ic n="noecho" size={14} /> {tx("Sans écouteurs")}</button>
           </div>
           <div style={{ height: 10 }} />
-          {!rec ? <button className="btn rec wide" onClick={startRec}><Ico n="record" s={26} /> Enregistrer une prise</button>
-            : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> Arrêter l’enregistrement</button>}
-          <div className="sl" style={{ marginTop: 10 }}><span>Latence</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
-          <div className="hint">Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.</div>
+          {!rec ? <button className="btn rec wide" onClick={startRec}><Ico n="record" s={26} /> {tx("Enregistrer une prise")}</button>
+            : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> {tx("Arrêter l’enregistrement")}</button>}
+          <div className="sl" style={{ marginTop: 10 }}><span>{tx("Latence")}</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
+          <div className="hint">{tx("Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.")}</div>
         </div>
         <div className="card">
-          <h3><Ico n="upload" s={28} /> Importer un MP4 ou un audio</h3>
+          <h3><Ico n="upload" s={28} /> {tx("Importer un MP4 ou un audio")}</h3>
           {busy === 'import' ? <div className="row"><span className="busy" /> {progress}</div> : <div className="row">
-            <label className="btn ai"><Ic n="sparkles" /> Recréer la chanson<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && recreate(e.target.files[0])} /></label>
-            <label className="btn"><Ic n="add" /> Ajouter comme piste<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && importAudio(e.target.files[0])} /></label>
+            <label className="btn ai"><Ic n="sparkles" /> {tx("Recréer la chanson")}<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && recreate(e.target.files[0])} /></label>
+            <label className="btn"><Ic n="add" /> {tx("Ajouter comme piste")}<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && importAudio(e.target.files[0])} /></label>
           </div>}
-          <div className="hint" style={{ marginTop: 8 }}><b>Recréer</b> : l’app extrait les paroles (Whisper, dans ton téléphone), le tempo, la tonalité et les accords, sépare la voix de l’instrumental, puis rebâtit mélodie et karaoké. Tu retrouves l’original, l’instrumental et la voix dans la table de son. La 1re fois, le modèle de transcription (~80 Mo) se télécharge. Utilise des chansons dont tu as les droits.</div>
+          <div className="hint" style={{ marginTop: 8 }}><b>{tx("Recréer")}</b> {tx(": l’app extrait les paroles (Whisper, dans ton téléphone), le tempo, la tonalité et les accords, sépare la voix de l’instrumental, puis rebâtit mélodie et karaoké. Tu retrouves l’original, l’instrumental et la voix dans la table de son. La 1re fois, le modèle de transcription (~80 Mo) se télécharge. Utilise des chansons dont tu as les droits.")}</div>
         </div>
 
-        {!song.tracks.length && <div className="empty">Aucune prise pour l’instant.<br />Enregistre ta voix, une guitare ou ton rythme parlé.</div>}
+        {!song.tracks.length && <div className="empty">{tx("Aucune prise pour l’instant.")}<br />{tx("Enregistre ta voix, une guitare ou ton rythme parlé.")}</div>}
         {song.tracks.map((t) => (
           <div key={t.id} className="track">
             <div className="row nw">
               <input className="nm" value={t.name} onChange={(e) => tr(t.id, (x) => (x.name = e.target.value))} />
               <button className={'tgl m' + (t.mute ? ' on' : '')} onClick={() => tr(t.id, (x) => (x.mute = !x.mute))}>M</button>
               <button className={'tgl s' + (t.solo ? ' on' : '')} onClick={() => tr(t.id, (x) => (x.solo = !x.solo))}>S</button>
-              <button className="tgl" aria-label="Supprimer" onClick={() => { if (confirmDel.current === t.id) up((s) => (s.tracks = s.tracks.filter((x) => x.id !== t.id))); else { confirmDel.current = t.id; say('Touche encore la corbeille pour supprimer'); } }}><Ico n="trash" s={22} /></button>
+              <button className="tgl" aria-label={tx("Supprimer")} onClick={() => { if (confirmDel.current === t.id) up((s) => (s.tracks = s.tracks.filter((x) => x.id !== t.id))); else { confirmDel.current = t.id; say(tx('Touche encore la corbeille pour supprimer')); } }}><Ico n="trash" s={22} /></button>
             </div>
             <Wave track={t} />
-            <div className="hint">Début : {t.start.toFixed(2)} s · {(t.data?.length / t.sr || 0).toFixed(1)} s</div>
+            <div className="hint">{tx('Début : {s} s · {d} s', { s: t.start.toFixed(2), d: (t.data?.length / t.sr || 0).toFixed(1) })}</div>
             <div className="chips" style={{ margin: '8px 0' }}>
-              {Object.entries(VOICE_FX).map(([k, f]) => <button key={k} className={'chip' + (t.fx === k ? ' on' : '')} onClick={() => tr(t.id, (x) => Object.assign(x, fxParams(k), { fx: k }))}>{f.n}</button>)}
+              {Object.entries(VOICE_FX).map(([k, f]) => <button key={k} className={'chip' + (t.fx === k ? ' on' : '')} onClick={() => tr(t.id, (x) => Object.assign(x, fxParams(k), { fx: k }))}>{tx(f.n)}</button>)}
             </div>
             <Slider label="Volume" v={t.vol} min={0} max={1.5} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.vol = x))} />
             <Slider label="Écho" v={t.echo || 0} min={0} max={0.8} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.echo = x))} />
-            <div className="sl"><span>Temps d’écho</span><select value={t.echoTime || '1/8.'} onChange={(e) => tr(t.id, (y) => (y.echoTime = e.target.value))}>{Object.keys(ECHO_TIMES).map((k) => <option key={k} value={k}>{k === 'slap' ? 'Slap (court)' : k + (k.endsWith('.') ? ' pointée' : '')}</option>)}</select><output /></div>
+            <div className="sl"><span>{tx("Temps d’écho")}</span><select value={t.echoTime || '1/8.'} onChange={(e) => tr(t.id, (y) => (y.echoTime = e.target.value))}>{Object.keys(ECHO_TIMES).map((k) => <option key={k} value={k}>{k === 'slap' ? tx('Slap (court)') : k + (k.endsWith('.') ? ' ' + tx('pointée') : '')}</option>)}</select><output /></div>
             <Slider label="Répétitions" v={t.fb ?? 0.3} min={0} max={0.85} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.fb = x))} />
             <Slider label="Réverb" v={t.reverb || 0} min={0} max={1} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.reverb = x))} />
             <Slider label="Doublage" v={t.double || 0} min={0} max={1} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.double = x))} />
             <Slider label="Brillance" v={t.bright || 0} min={-6} max={9} step={0.5} fmt={(x) => x + 'dB'} on={(x) => tr(t.id, (y) => (y.bright = x))} />
             <Slider label="Panoramique" v={t.pan || 0} min={-1} max={1} step={0.05} fmt={(x) => (x < 0 ? 'G' : x > 0 ? 'D' : 'C') + Math.abs(Math.round(x * 100))} on={(x) => tr(t.id, (y) => (y.pan = x))} />
             <div className="row" style={{ marginTop: 6 }}>
-              <span className="hint">Décaler :</span>
-              {[[-0.05, '−50ms'], [-0.01, '−10'], [0.01, '+10'], [0.05, '+50ms']].map(([d, n]) => <button key={n} className="btn sm" onClick={() => tr(t.id, (y) => (y.start = Math.max(0, y.start + d)))}>{n}</button>)}
+              <span className="hint">{tx("Décaler :")}</span>
+              {[[-0.05, '−50ms'], [-0.01, '−10'], [0.01, '+10'], [0.05, '+50ms']].map(([d, n]) => <button key={n} className="btn sm" onClick={() => tr(t.id, (y) => (y.start = Math.max(0, y.start + d)))}>{tx(n)}</button>)}
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn sm ai" onClick={() => alignVoice(t)}><Ico n="voice-wave" s={22} /> Caler le karaoké sur cette voix</button>
-              <button className="btn sm" onClick={() => detectTempo(t)}><Ico n="metronome" s={20} /> Tempo</button>
-              <button className="btn sm" onClick={async () => { const e = await ensureAudio(); const bar = Math.floor(t.start / (16 * s16(song.bpm))); e.play(song, { from: bar, onEnd: () => setPlaying(false) }); setPlaying(true); }}><Ic n="play" size={14} /> Écouter</button>
+              <button className="btn sm ai" onClick={() => alignVoice(t)}><Ico n="voice-wave" s={22} /> {tx("Caler le karaoké sur cette voix")}</button>
+              <button className="btn sm" onClick={() => detectTempo(t)}><Ico n="metronome" s={20} /> {tx("Tempo")}</button>
+              <button className="btn sm" onClick={async () => { const e = await ensureAudio(); const bar = Math.floor(t.start / (16 * s16(song.bpm))); e.play(song, { from: bar, onEnd: () => setPlaying(false) }); setPlaying(true); }}><Ic n="play" size={14} /> {tx("Écouter")}</button>
             </div>
           </div>
         ))}
-        {song.tracks.length > 0 && <label className="row" style={{ fontSize: 13, margin: '4px 4px 12px' }}><input type="checkbox" checked={song.voicePitch} onChange={(e) => up((s) => (s.voicePitch = e.target.checked))} /> En calant, reprendre aussi les notes que je chante</label>}
+        {song.tracks.length > 0 && <label className="row" style={{ fontSize: 13, margin: '4px 4px 12px' }}><input type="checkbox" checked={song.voicePitch} onChange={(e) => up((s) => (s.voicePitch = e.target.checked))} /> {tx("En calant, reprendre aussi les notes que je chante")}</label>}
       </>}
 
       {/* ================= TABLE DE SON ================= */}
@@ -789,36 +806,36 @@ export default function Page() {
       {/* ================= CLIP ================= */}
       {tab === 'clip' && <>
         <div className="card">
-          <h3><Ico n="spectrum" s={28} /> Vidéoclip animé</h3>
+          <h3><Ico n="spectrum" s={28} /> {tx("Vidéoclip animé")}</h3>
           <canvas ref={clipRef} className="clip-cv" />
-          <label className="f">Format prêt à publier (1080p)</label>
-          <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{p.n} <small>{p.f}</small></button>)}</div>
-          <label className="f">Thème visuel</label>
-          <div className="chips">{Object.entries(THEMES).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{t.n}</button>)}</div>
-          <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{n}</button>)}</div>
+          <label className="f">{tx("Format prêt à publier (1080p)")}</label>
+          <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{tx(p.n)} <small>{p.f}</small></button>)}</div>
+          <label className="f">{tx("Thème visuel")}</label>
+          <div className="chips">{Object.entries(THEMES).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
-            <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <span className="busy" /> : <Ic n="sparkles" />} Scénario IA</button>
-            <label className="btn"><Ic n="film" /> Vidéo de fond<input type="file" accept="video/*" hidden onChange={(e) => e.target.files[0] && setVideoBg(e.target.files[0])} /></label>
-            {videoBg.current && <button className="btn sm" onClick={() => { videoBg.current = null; bump(); }}><Ic n="x" /> Vidéo</button>}
-            <label className="btn"><Ic n="images" /> Mes photos<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(`${photos.current.length} photo(s) ajoutée(s)`); }} /></label>
-            {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}><Ic n="undo" /> Thème simple</button>}
+            <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Scénario IA')}</button>
+            <label className="btn"><Ic n="film" /> {tx("Vidéo de fond")}<input type="file" accept="video/*" hidden onChange={(e) => e.target.files[0] && setVideoBg(e.target.files[0])} /></label>
+            {videoBg.current && <button className="btn sm" onClick={() => { videoBg.current = null; bump(); }}><Ic n="x" /> {tx("Vidéo")}</button>}
+            <label className="btn"><Ic n="images" /> {tx("Mes photos")}<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /></label>
+            {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}><Ic n="undo" /> {tx("Thème simple")}</button>}
           </div>
-          <div className="hint" style={{ marginTop: 8 }}>Claude écrit le scénario : un thème, des couleurs et des mots-clés par section. L’animation suit le son et les paroles s’affichent en karaoké. Tes photos défilent en fond, une par ligne.</div>
+          <div className="hint" style={{ marginTop: 8 }}>{tx("Claude écrit le scénario : un thème, des couleurs et des mots-clés par section. L’animation suit le son et les paroles s’affichent en karaoké. Tes photos défilent en fond, une par ligne.")}</div>
         </div>
         <div className="card">
-          <h3><Ico n="share" s={28} /> Exporter</h3>
+          <h3><Ico n="share" s={28} /> {tx("Exporter")}</h3>
           {exporting ? <>
-            <div className="row"><span className="busy" /> Export {exporting === 'clip' ? 'du clip' : exporting === 'wav' ? 'WAV' : 'MP4'} en cours… garde l’écran allumé.</div>
-            {exporting !== 'wav' && <button className="btn sm" style={{ marginTop: 8 }} onClick={() => exportStop.current?.()}><Ic n="stop" /> Arrêter et enregistrer</button>}
+            <div className="row"><span className="busy" /> {tx('Export {w} en cours… garde l’écran allumé.', { w: exporting === 'clip' ? tx('du clip') : exporting === 'wav' ? 'WAV' : 'MP4' })}</div>
+            {exporting !== 'wav' && <button className="btn sm" style={{ marginTop: 8 }} onClick={() => exportStop.current?.()}><Ic n="stop" /> {tx("Arrêter et enregistrer")}</button>}
           </> : <>
-          <label className="f">Partie à exporter</label>
-          <div className="chips" style={{ marginBottom: 10 }}>{[['all', 'Toute la chanson'], ['chorus', 'Le refrain'], ['30', '30 s'], ['60', '60 s']].map(([k, n]) => <button key={k} className={'chip' + (range === k ? ' on' : '')} onClick={() => setRange(k)}>{n}</button>)}</div>
+          <label className="f">{tx("Partie à exporter")}</label>
+          <div className="chips" style={{ marginBottom: 10 }}>{[['all', 'Toute la chanson'], ['chorus', 'Le refrain'], ['30', '30 s'], ['60', '60 s']].map(([k, n]) => <button key={k} className={'chip' + (range === k ? ' on' : '')} onClick={() => setRange(k)}>{tx(n)}</button>)}</div>
           <div className="row">
-            <button className="btn pri" onClick={() => exportLive(true)}><Ico n="play" s={22} /> Clip MP4</button>
-            <button className="btn" onClick={() => exportLive(false)}><Ico n="disc-note" s={22} /> Audio MP4</button>
-            <button className="btn" onClick={exportWav}><Ico n="wav" s={22} /> WAV studio</button>
+            <button className="btn pri" onClick={() => exportLive(true)}><Ico n="play" s={22} /> {tx("Clip MP4")}</button>
+            <button className="btn" onClick={() => exportLive(false)}><Ico n="disc-note" s={22} /> {tx("Audio MP4")}</button>
+            <button className="btn" onClick={exportWav}><Ico n="wav" s={22} /> {tx("WAV studio")}</button>
           </div></>}
-          <div className="hint" style={{ marginTop: 8 }}>Clip MP4 en H.264 + AAC, 1080p, 30 images/s : prêt pour TikTok, Reels, Shorts et YouTube. 30 s et 60 s partent du 1er refrain. L’export se fait en temps réel ; le WAV (chanson complète) est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.</div>
+          <div className="hint" style={{ marginTop: 8 }}>{tx("Clip MP4 en H.264 + AAC, 1080p, 30 images/s : prêt pour TikTok, Reels, Shorts et YouTube. 30 s et 60 s partent du 1er refrain. L’export se fait en temps réel ; le WAV (chanson complète) est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.")}</div>
         </div>
       </>}
 
@@ -837,22 +854,22 @@ export default function Page() {
       )}
 
       <div className="transport"><div className="in">
-        <button className="tbtn" onClick={() => { stop(); }} aria-label="Arrêter"><Ico n="stop" s={34} /></button>
-        <button className="play" onClick={() => (playing ? stop() : play({ from: 0 }))} aria-label="Lecture">{playing ? <Ico n="pause" s={52} /> : <Ico n="play" s={52} />}</button>
+        <button className="tbtn" onClick={() => { stop(); }} aria-label={tx("Arrêter")}><Ico n="stop" s={34} /></button>
+        <button className="play" onClick={() => (playing ? stop() : play({ from: 0 }))} aria-label={tx("Lecture")}>{playing ? <Ico n="pause" s={52} /> : <Ico n="play" s={52} />}</button>
         <div className="tinfo">
-          <b>{rec ? <><span className="rec-dot" /> Enregistrement…</> : song.title}</b>
-          {M.STYLES[song.style].n} · {keyLabel} · {song.bpm} BPM · <span className="pos">{posLabel}</span>
+          <b>{rec ? <><span className="rec-dot" /> {tx("Enregistrement…")}</> : song.title}</b>
+          {tx(M.STYLES[song.style].n)} · {keyLabel} · {song.bpm} BPM · <span className="pos">{posLabel}</span>
         </div>
-        <button className={'tbtn' + (loop ? ' on' : '')} onClick={() => setLoop(!loop)} aria-label="Boucle"><Ico n="loop" s={34} dim={!loop} /></button>
-        <button className="tbtn" onClick={() => setKara(true)} aria-label="Karaoké"><Ico n="microphone" s={30} /></button>
-        <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : startRec())} aria-label="Enregistrer">{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
+        <button className={'tbtn' + (loop ? ' on' : '')} onClick={() => setLoop(!loop)} aria-label={tx("Boucle")}><Ico n="loop" s={34} dim={!loop} /></button>
+        <button className="tbtn" onClick={() => setKara(true)} aria-label={tx("Karaoké")}><Ico n="microphone" s={30} /></button>
+        <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : startRec())} aria-label={tx("Enregistrer")}>{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
       </div></div>
 
       {kara && <Karaoke song={song} tl={tl} eng={eng} playing={playing} rec={rec} onClose={() => setKara(false)} onPlay={() => (playing ? stop() : play({ from: 0 }))} onRec={() => (rec ? finishRec() : startRec())} />}
 
       {sheet && <div className="sheet-bg" onClick={() => setSheet(null)}><div className="sheet" onClick={(e) => e.stopPropagation()}>
         {sheet.type === 'chord' && <>
-          <h3>Choisir l’accord</h3>
+          <h3>{tx("Choisir l’accord")}</h3>
           <div className="ch-grid">
             {[1, 2, 3, 4, 5, 6, 7].map((d) => {
               const cur = song.blocks[sheet.bi].lines[sheet.li].chords[sheet.ci];
@@ -860,28 +877,30 @@ export default function Page() {
                 {M.chordName(d, song.key, song.mode, song.fr)}<small>{['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'][d - 1]}</small></button>;
             })}
           </div>
-          <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>OK</button>
+          <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
         {sheet.type === 'profile' && me && <>
-          <h3><img src={avSrc(me.av)} alt="" style={{ width: 34, height: 34, borderRadius: '50%' }} /> Mon profil</h3>
-          <label className="f">Prénom</label><input type="text" value={me.name || ''} onChange={(e) => setMe({ ...me, name: e.target.value })} />
-          <label className="f">Nom d’artiste</label><input type="text" value={me.artist || ''} onChange={(e) => setMe({ ...me, artist: e.target.value })} />
-          <label className="f">Avatar</label>
+          <h3><img src={avSrc(me.av)} alt="" style={{ width: 34, height: 34, borderRadius: '50%' }} /> {tx("Mon profil")}</h3>
+          <label className="f">{tx("Prénom")}</label><input type="text" value={me.name || ''} onChange={(e) => setMe({ ...me, name: e.target.value })} />
+          <label className="f">{tx("Nom d’artiste")}</label><input type="text" value={me.artist || ''} onChange={(e) => setMe({ ...me, artist: e.target.value })} />
+          <label className="f">{tx("Avatar")}</label>
           <div style={{ maxHeight: 320, display: 'flex' }}><AvatarGrid value={me.av} onPick={(a) => setMe({ ...me, av: a })} /></div>
-          <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>OK</button>
+          <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
         {sheet.type === 'songs' && <SongsSheet song={song} load={load} close={() => setSheet(null)} say={say} />}
         {sheet.type === 'settings' && <>
-          <h3><Ico n="settings" s={28} /> Réglages</h3>
-          <div className="hint">IA : {aiStatus == null ? '…' : aiStatus.ai ? 'Clé Anthropic détectée ✓' : 'Aucune clé (ajoute ANTHROPIC_API_KEY dans Vercel)'}</div>
-          {aiStatus?.locked && <><label className="f">Code d’accès IA</label><input type="text" value={code} onChange={(e) => { setCode(e.target.value); localStorage.setItem('sonyria-code', e.target.value); }} placeholder="Code défini dans Vercel" /></>}
-          <label className="f">Notation</label>
-          <div className="chips"><button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button><button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>Do Ré Mi</button></div>
-          <label className="f">Profil</label>
-          <div className="row"><button className="btn sm" onClick={() => setSheet({ type: 'profile' })}><Ic n="user" /> Prénom, nom d’artiste, avatar</button><button className="btn sm" onClick={() => { setMe({ ...me, onboarded: false }); setSheet(null); }}><Ic n="undo" /> Revoir l’accueil</button></div>
-          <label className="f">Installer l’app</label>
-          <div className="hint">Android / Chrome : bouton « Installer » en haut, ou menu ⋮ → « Installer l’application ». iPhone : Partager → « Sur l’écran d’accueil ».</div>
-          <button className="btn wide" style={{ marginTop: 14 }} onClick={() => setSheet(null)}>Fermer</button>
+          <h3><Ico n="settings" s={28} /> {tx("Réglages")}</h3>
+          <div className="hint">{tx('IA : ')}{aiStatus == null ? '…' : aiStatus.ai ? tx('Clé Anthropic détectée ✓') : tx('Aucune clé (ajoute ANTHROPIC_API_KEY dans Vercel)')}</div>
+          {aiStatus?.locked && <><label className="f">{tx("Code d’accès IA")}</label><input type="text" value={code} onChange={(e) => { setCode(e.target.value); localStorage.setItem('sonyria-code', e.target.value); }} placeholder={tx("Code défini dans Vercel")} /></>}
+          <label className="f">{tx('Langue')}</label>
+          <div className="chips"><button className={'chip' + (lang === 'fr' ? ' on' : '')} onClick={() => setLang('fr')}>Français</button><button className={'chip' + (lang === 'en' ? ' on' : '')} onClick={() => setLang('en')}>English</button></div>
+          <label className="f">{tx("Notation")}</label>
+          <div className="chips"><button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button><button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>{tx("Do Ré Mi")}</button></div>
+          <label className="f">{tx("Profil")}</label>
+          <div className="row"><button className="btn sm" onClick={() => setSheet({ type: 'profile' })}><Ic n="user" /> {tx("Prénom, nom d’artiste, avatar")}</button><button className="btn sm" onClick={() => { setMe({ ...me, onboarded: false }); setSheet(null); }}><Ic n="undo" /> {tx("Revoir l’accueil")}</button></div>
+          <label className="f">{tx("Installer l’app")}</label>
+          <div className="hint">{tx("Android / Chrome : bouton « Installer » en haut, ou menu ⋮ → « Installer l’application ». iPhone : Partager → « Sur l’écran d’accueil ».")}</div>
+          <button className="btn wide" style={{ marginTop: 14 }} onClick={() => setSheet(null)}>{tx("Fermer")}</button>
         </>}
       </div></div>}
 
@@ -943,7 +962,7 @@ function MicMeter({ eng }) {
     const f = () => { const a = eng.current?.micAnalyser; if (a) { a.getByteTimeDomainData(d); let m = 0; for (let i = 0; i < d.length; i++) m = Math.max(m, Math.abs(d[i] - 128)); setLv(m / 128); } raf = requestAnimationFrame(f); };
     f(); return () => cancelAnimationFrame(raf);
   }, [eng]);
-  return <div><div className="hint"><Ic n="mic" size={13} /> Micro actif — niveau</div><div className="meter"><i style={{ width: Math.min(100, lv * 140) + '%' }} /></div></div>;
+  return <div><div className="hint"><Ic n="mic" size={13} /> {tx("Micro actif — niveau")}</div><div className="meter"><i style={{ width: Math.min(100, lv * 140) + '%' }} /></div></div>;
 }
 
 function Mixer({ song, up, eng, playing }) {
@@ -957,22 +976,22 @@ function Mixer({ song, up, eng, playing }) {
   const strips = [['lead', 'Voix guide', 'note'], ['harm', 'Harmonie', 'wave-pink'], ['chords', 'Accords', 'piano'], ['bass', 'Basse', 'bass'], ['drums', 'Batterie', 'drumkit'], ['tracks', 'Pistes', 'mic']];
   return <>
     <div className="card">
-      <h3><Ico n="mixer" s={28} /> Table de son</h3>
+      <h3><Ico n="mixer" s={28} /> {tx("Table de son")}</h3>
       <div className="console">
-        {strips.map(([k, n, i]) => <Strip key={k} name={n} icon={i} val={m[k]} meter={lv[k]} set={(x) => up((s) => (s.mix[k] = x))} mute={m.mute[k]} solo={m.solo[k]}
+        {strips.map(([k, n, i]) => <Strip key={k} name={tx(n)} icon={i} val={m[k]} meter={lv[k]} set={(x) => up((s) => (s.mix[k] = x))} mute={m.mute[k]} solo={m.solo[k]}
           onMute={() => up((s) => (s.mix.mute[k] = !s.mix.mute[k]))} onSolo={() => up((s) => (s.mix.solo[k] = !s.mix.solo[k]))} />)}
         {song.tracks.map((t) => <Strip key={t.id} name={t.name} icon="voice-wave" val={t.vol} meter={lv['tr_' + t.id]} set={(x) => up((s) => (s.tracks.find((y) => y.id === t.id).vol = x))} mute={t.mute} solo={t.solo}
           onMute={() => up((s) => { const y = s.tracks.find((z) => z.id === t.id); y.mute = !y.mute; })} onSolo={() => up((s) => { const y = s.tracks.find((z) => z.id === t.id); y.solo = !y.solo; })}
-          extra={<input type="range" className="knob" min="-1" max="1" step="0.05" value={t.pan || 0} title="Panoramique" onChange={(e) => up((s) => (s.tracks.find((y) => y.id === t.id).pan = +e.target.value))} />} />)}
-        <Strip name="Master" icon="speaker" val={m.master} meter={lv.master} set={(x) => up((s) => (s.mix.master = x))} />
+          extra={<input type="range" className="knob" min="-1" max="1" step="0.05" value={t.pan || 0} title={tx("Panoramique")} onChange={(e) => up((s) => (s.tracks.find((y) => y.id === t.id).pan = +e.target.value))} />} />)}
+        <Strip name={tx("Master")} icon="speaker" val={m.master} meter={lv.master} set={(x) => up((s) => (s.mix.master = x))} />
       </div>
-      {!playing && <div className="hint" style={{ marginTop: 8 }}>Lance la lecture pour voir les vumètres bouger.</div>}
+      {!playing && <div className="hint" style={{ marginTop: 8 }}>{tx("Lance la lecture pour voir les vumètres bouger.")}</div>}
     </div>
     <div className="card">
-      <h3><Ico n="fx" s={28} /> Effets de la voix guide</h3>
+      <h3><Ico n="fx" s={28} /> {tx("Effets de la voix guide")}</h3>
       <Slider label="Écho" v={m.leadEcho} min={0} max={0.7} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => up((s) => (s.mix.leadEcho = x))} />
       <Slider label="Réverb" v={m.leadReverb} min={0} max={1} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => up((s) => (s.mix.leadReverb = x))} />
-      <div className="hint">Les effets de tes prises (écho, réverb, doublage, brillance) se règlent piste par piste dans l’onglet Studio.</div>
+      <div className="hint">{tx("Les effets de tes prises (écho, réverb, doublage, brillance) se règlent piste par piste dans l’onglet Studio.")}</div>
     </div>
   </>;
 }
@@ -988,7 +1007,7 @@ function Strip({ name, icon, val, set, mute, solo, onMute, onSolo, meter, extra 
         <input type="range" min="0" max="1.2" step="0.01" value={val} onChange={(e) => set(+e.target.value)} />
       </div>
       <div className="sval">{Math.round(val * 100)}</div>
-      {onMute && <div className="row nw" style={{ gap: 4 }}><button className="imgtgl" onClick={onMute} aria-label="Muet"><Ico n="mute-m" s={30} dim={!mute} /></button><button className="imgtgl" onClick={onSolo} aria-label="Solo"><Ico n="solo" s={30} dim={!solo} /></button></div>}
+      {onMute && <div className="row nw" style={{ gap: 4 }}><button className="imgtgl" onClick={onMute} aria-label={tx("Muet")}><Ico n="mute-m" s={30} dim={!mute} /></button><button className="imgtgl" onClick={onSolo} aria-label={tx("Solo")}><Ico n="solo" s={30} dim={!solo} /></button></div>}
     </div>
   );
 }
@@ -1011,7 +1030,7 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
   return (
     <div className="kara">
       <div className="top">
-        <button className="icon-btn" onClick={onClose} aria-label="Fermer"><Ic n="x" /></button>
+        <button className="icon-btn" onClick={onClose} aria-label={tx("Fermer")}><Ic n="x" /></button>
         <div style={{ flex: 1 }}><div className="sec">{cur?.label || ''}</div><div className="hint">{song.title} · {song.bpm} BPM</div></div>
         {rec && <span className="rec-dot" />}
       </div>
@@ -1045,18 +1064,18 @@ function SongsSheet({ song, load, close, say }) {
   const refresh = () => DB.listSongs().then(setList).catch(() => setList([]));
   useEffect(() => { refresh(); }, []);
   return <>
-    <h3><Ico n="folder" s={28} /> Mes chansons</h3>
+    <h3><Ico n="folder" s={28} /> {tx("Mes chansons")}</h3>
     <div className="row" style={{ marginBottom: 10 }}>
-      <button className="btn pri" onClick={() => { load(newSong('')); close(); }}>＋ Nouvelle chanson</button>
-      <button className="btn" onClick={() => { const c = structuredClone(serialize(song)); c.id = 's' + Date.now(); c.title = song.title + ' (copie)'; load(c); close(); say('Copie créée'); }}>⧉ Dupliquer</button>
+      <button className="btn pri" onClick={() => { load(newSong('')); close(); }}>{tx("＋ Nouvelle chanson")}</button>
+      <button className="btn" onClick={() => { const c = structuredClone(serialize(song)); c.id = 's' + Date.now(); c.title = song.title + tx(' (copie)'); load(c); close(); say(tx('Copie créée')); }}>{tx("⧉ Dupliquer")}</button>
     </div>
-    {list == null ? <span className="busy" /> : !list.length ? <div className="hint">Rien d’enregistré pour l’instant (sauvegarde automatique).</div> :
+    {list == null ? <span className="busy" /> : !list.length ? <div className="hint">{tx("Rien d’enregistré pour l’instant (sauvegarde automatique).")}</div> :
       list.map((x) => (
         <div key={x.id} className="row nw" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
           <button className="grow" style={{ textAlign: 'left' }} onClick={async () => { const r = await DB.getSong(x.id); if (r) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } }}>
-            <b>{x.title || 'Sans titre'}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>ouverte</span>}<div className="hint">{new Date(x.updated).toLocaleString('fr-CA')}</div>
+            <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}<div className="hint">{new Date(x.updated).toLocaleString(getLang() === 'en' ? 'en-CA' : 'fr-CA')}</div>
           </button>
-          {x.id !== song.id && <button className="tgl" onClick={async () => { await DB.deleteSong(x.id); refresh(); }} aria-label="Supprimer"><Ico n="trash" s={24} /></button>}
+          {x.id !== song.id && <button className="tgl" onClick={async () => { await DB.deleteSong(x.id); refresh(); }} aria-label={tx("Supprimer")}><Ico n="trash" s={24} /></button>}
         </div>
       ))}
   </>;

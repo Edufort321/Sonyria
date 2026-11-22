@@ -1,7 +1,7 @@
 {
-  "name": "Sonyria — Studio de chansons",
+  "name": "Sonyria — Studio de chansons / Song studio",
   "short_name": "Sonyria",
-  "description": "Colle tes paroles : mélodies, accords, beats, enregistrement, karaoké et vidéoclips.",
+  "description": "Colle tes paroles : mélodies, accords, beat, studio, karaoké et vidéoclips. Paste your lyrics: melodies, chords, beat, studio, karaoke and music videos.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
