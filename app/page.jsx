@@ -1302,9 +1302,17 @@ export default function Page() {
           </Sub>
           <Sub k="clip-theme" t={tx('Décor')} note={videoBg.current ? tx('Ma vidéo') : tx(THEMES[scenario.theme]?.n || '')} open>
           <div className="chips seg">
-            {[['anim', 'Décor animé'], ['video', 'Vidéos réelles'], ['photo', 'Photos réelles']].map(([k, n]) => <button key={k} className={'chip' + (decor === k ? ' on' : '')} onClick={() => setDecor(k)}>{tx(n)}</button>)}
+            {[['anim', 'Décor animé'], ['mine', 'Mes photos'], ['video', 'Vidéos réelles'], ['photo', 'Photos réelles']].map(([k, n]) => <button key={k} className={'chip' + (decor === k ? ' on' : '')} onClick={() => setDecor(k)}>{tx(n)}</button>)}
           </div>
-          {decor !== 'anim' ? <RealMedia kind={decor} orient={song.clip.format === '16:9' ? 'landscape' : song.clip.format === '1:1' ? 'square' : 'portrait'} say={say}
+          {decor === 'mine' ? <div style={{ marginTop: 8 }}>
+            <div className="row">
+              <label className="btn pri"><Ic n="images" /> {tx('Choisir mes photos')}<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); e.target.value = ''; if (videoBg.current) removeVideo(); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /></label>
+              <label className="btn"><Ic n="camera" /> {tx('Prendre une photo')}<input type="file" accept="image/*" capture="environment" hidden onChange={async (e) => { const im = e.target.files[0] && (await loadImage(e.target.files[0])); e.target.value = ''; if (im) { photos.current = [...photos.current, im].slice(-12); if (videoBg.current) removeVideo(); bump(); } }} /></label>
+              {photos.current.length > 0 && <button className="btn sm" onClick={() => { photos.current = []; bump(); }}><Ico n="trash" s={18} /> {tx('Retirer')}</button>}
+            </div>
+            {photos.current.length > 0 && <div className="mini-thumbs">{photos.current.map((im, i) => <img key={i} src={im.src} alt="" />)}</div>}
+            <div className="hint" style={{ marginTop: 6 }}>{tx('Jusqu’à 12 photos : elles défilent une par ligne de paroles, avec un léger mouvement. Tu peux ajouter des effets dans Visuel.')}</div>
+          </div> : decor !== 'anim' ? <RealMedia kind={decor} orient={song.clip.format === '16:9' ? 'landscape' : song.clip.format === '1:1' ? 'square' : 'portrait'} say={say}
             onVideo={(blob) => { attachVideo(blob, { vMode: 'plein', vLoop: true, vSound: 'app', cutout: false, mirror: false }).then(() => say(tx('Vidéo réelle ajoutée au clip'))); }}
             onPhotos={async (blobs) => { photos.current = (await Promise.all(blobs.map((b) => loadImage(b)))).filter(Boolean); if (videoBg.current) removeVideo(); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /> : <>
           <label className="f">{tx("Décor animé")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
