@@ -1,6 +1,14 @@
 // Sonyria — route serveur : appelle l'API Anthropic avec la clé stockée dans Vercel (jamais exposée au navigateur)
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
+// accepte aussi les variantes de nom courantes (espaces ou casse différente)
+function apiKey() {
+  const env = process.env;
+  const name = Object.keys(env).find((k) => /^(ANTHROPIC_API_KEY|ANTHROPIC_KEY|CLAUDE_API_KEY|CLAUDE_KEY)$/i.test(k.trim()));
+  return name ? String(env[name]).trim() : '';
+}
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const STYLES = ['pop', 'ballade', 'hiphop', 'trap', 'rnb', 'rock', 'folk', 'reggaeton', 'afro', 'edm', 'lofi', 'jazz'];
@@ -75,7 +83,7 @@ function extractJson(text) {
 }
 
 export async function POST(req) {
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = apiKey();
   if (!key) return Response.json({ error: 'Clé ANTHROPIC_API_KEY absente dans Vercel.' }, { status: 503 });
   const code = process.env.SONYRIA_ACCESS_CODE;
   if (code && req.headers.get('x-access-code') !== code) return Response.json({ error: 'Code d’accès requis (Réglages).' }, { status: 401 });
@@ -102,5 +110,11 @@ export async function POST(req) {
 }
 
 export async function GET() {
-  return Response.json({ ok: true, ai: !!process.env.ANTHROPIC_API_KEY, locked: !!process.env.SONYRIA_ACCESS_CODE });
+  const k = apiKey();
+  // diagnostic : noms seulement (jamais les valeurs)
+  const names = Object.keys(process.env).filter((n) => /anthropic|claude|sonyria/i.test(n));
+  return Response.json(
+    { ok: true, ai: !!k, keyFormat: k ? (k.startsWith('sk-ant-') ? 'ok' : 'inattendu') : null, locked: !!process.env.SONYRIA_ACCESS_CODE, env: process.env.VERCEL_ENV || 'local', vars: names },
+    { headers: { 'cache-control': 'no-store' } }
+  );
 }
