@@ -15,6 +15,7 @@ import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
 import { makeBacking, BACKS, tune, gate, normalize, fades, trimStart } from '@/lib/backing';
+import { analyzeTake, remixPlan } from '@/lib/vocalai';
 import { newCode, prettyCode, normCode, loadSpaces, saveSpaces, syncSpace, syncReady, peekSpace } from '@/lib/sync';
 import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/lib/cover';
 import Ic, { IconDefs, Ico } from './Ic';
@@ -552,6 +553,45 @@ export default function Page() {
     const e = await ensureAudio();
     up((s) => { const x = s.tracks.find((y) => y.id === t.id); if (!x?.orig) return; x.data = x.orig; x.start = x.origStart ?? x.start; x.orig = null; x.fixes = []; x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
     say(tx('Prise originale rétablie'));
+  };
+  // ---------- remix pro + professeur de chant ----------
+  const [coach, setCoach] = useState(null);
+  const [coachAi, setCoachAi] = useState(null);
+  const leadTake = (id) => song.tracks.find((t) => t.id === id) || song.tracks.find((t) => !t.back && !t.remix && t.data);
+  const remixPro = async (id) => {
+    const t = leadTake(id); if (!t?.data) return say(tx('Enregistre d’abord ta voix'));
+    setBusy('remix'); await new Promise((r) => setTimeout(r, 40));
+    try {
+      const e = await ensureAudio(); await snapshot(tx('Avant le remix pro'), 'named');
+      const lead = normalize(fades(gate(t.data, t.sr), t.sr));
+      const plan = remixPlan(lead, t.sr, t.start, buildTimeline(song), song);
+      up((s) => {
+        s.tracks = s.tracks.filter((x) => !x.remix);
+        const L = s.tracks.find((x) => x.id === t.id); if (L) { if (!L.orig) { L.orig = L.data; L.origStart = L.start; } L.data = lead; L.buffer = storeToBuffer(e.ctx, { sr: L.sr, ch: [lead] }); Object.assign(L, fxParams('studio'), { fx: 'studio', vol: 1, pan: 0 }); L.fixes = [...(L.fixes || []), 'remix']; }
+        plan.forEach((x) => { mkTrack(s, `${tx('Remix')} · ${tx(x.name)}`, x.data, t.sr, t.start, false, x.fx); Object.assign(s.tracks[s.tracks.length - 1], { pan: x.pan, vol: x.vol, echo: x.echo ?? 0.2, fb: x.fb ?? 0.35, echoTime: x.echoTime || '1/8.', reverb: x.reverb ?? 0.4, back: true, remix: true }); });
+        s.guide = false; s.mix.preset = s.mix.preset && s.mix.preset !== 'naturel' ? s.mix.preset : 'radio';
+      });
+      song.tracks.forEach((x) => { if (!x.buffer && x.data) x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
+      say(tx('Remix pro prêt : doublages et harmonies sur les refrains, échos en fin de phrase'));
+      play({ from: 0 });
+    } catch (err) { say(tx('Remix impossible')); }
+    setBusy('');
+  };
+  const undoRemix = () => { up((s) => { s.tracks = s.tracks.filter((x) => !x.remix); s.guide = true; }); say(tx('Remix retiré')); };
+  const runCoach = async (id) => {
+    const t = leadTake(id); if (!t?.data) return say(tx('Enregistre d’abord ta voix'));
+    setBusy('coach'); setCoachAi(null); await new Promise((r) => setTimeout(r, 40));
+    try { setCoach({ id: t.id, ...analyzeTake(t.data, t.sr, t.start, buildTimeline(song), song) }); } catch (err) { say(tx('Analyse impossible')); }
+    setBusy('');
+  };
+  const coachIa = async () => {
+    if (!coach) return; setBusy('coachia');
+    try {
+      const d = await ai('coach', { lyrics: song.lyrics, style: M.STYLES[song.style].n, bpm: song.bpm, pitchScore: coach.pitchScore, timeScore: coach.timeScore, chorusGain: coach.chorusGain,
+        lines: coach.lines.map((l, i) => ({ i, section: l.label, text: l.text, cents: l.cents == null ? null : Math.round(l.cents), late: l.late == null ? null : Math.round(l.late), db: +l.db.toFixed(1), voiced: +l.voiced.toFixed(2) })) });
+      setCoachAi(d);
+    } catch (e) { say(e.message); }
+    setBusy('');
   };
   const lastSnap = useRef(0);
   const snapshot = async (name, kind = 'auto') => {
@@ -1255,6 +1295,33 @@ export default function Page() {
         </div>
 
         {!song.tracks.length && <div className="empty">{tx("Aucune prise pour l’instant.")}<br />{tx("Enregistre ta voix, une guitare ou ton rythme parlé.")}</div>}
+        {song.tracks.some((t) => t.data && !t.back) && <div className="card pro-card">
+          <h3><Ico n="headphones-heart" s={28} /> {tx('Remix pro & professeur de chant')}</h3>
+          <div className="row">
+            <button className="btn pri" disabled={!!busy} onClick={() => remixPro()}>{busy === 'remix' ? <span className="busy" /> : <Ic n="wand" />} {tx('Remix pro automatique')}</button>
+            {song.tracks.some((t) => t.remix) && <button className="btn sm" onClick={undoRemix}><Ic n="undo" /> {tx('Retirer le remix')}</button>}
+            <button className="btn" disabled={!!busy} onClick={() => runCoach()}>{busy === 'coach' ? <span className="busy" /> : <Ico n="microphone" s={20} />} {tx('Professeur de chant')}</button>
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>{tx('Remix pro : à partir de ta première prise, Sonyria ajoute tes propres back vocals (doublage gauche-droite et harmonies à la tierce sur les refrains, quinte au refrain final), des échos seulement en fin de phrase, nettoie ta voix et passe en mastering « Radio ». Ta prise originale et une version « Avant le remix pro » sont gardées.')}</div>
+          {coach && <div className="coach">
+            <div className="coach-sc">
+              <div><b>{coach.pitchScore ?? '—'}%</b><small>{tx('Justesse')}</small></div>
+              <div><b>{coach.timeScore ?? '—'}%</b><small>{tx('Rythme')}</small></div>
+              <div><b>{coach.chorusGain == null ? '—' : (coach.chorusGain > 0 ? '+' : '') + coach.chorusGain + ' dB'}</b><small>{tx('Énergie refrain')}</small></div>
+            </div>
+            {coach.lines.map((l, i) => <div key={i} className={'coach-l' + (l.ok ? ' ok' : '')}>
+              <div className="row nw"><b className="grow">{l.text}</b><button className="mini" onClick={() => play({ from: Math.max(0, l.t0 - 0.5) / (16 * s16(song.bpm)), to: Math.ceil((l.t1 + 0.6) / (16 * s16(song.bpm))) })}><Ic n="play" size={14} /></button></div>
+              <div className="coach-tips">{l.tips.map((t, k) => <span key={k} className={'ct ' + t.k}>{{ off: t.up ? tx('Pas la bonne note : monte d’environ {v} demi-ton(s)', { v: t.v }) : tx('Pas la bonne note : descends d’environ {v} demi-ton(s)', { v: t.v }), miss: tx('Notes qui manquent : soutiens ton souffle jusqu’au bout'), high: tx('Un peu haut ({v} cents)', { v: t.v }), low: tx('Un peu bas ({v} cents)', { v: t.v }), wobble: tx('Voix instable : appuie-toi sur le souffle'), late: tx('Tu entres en retard ({v} ms)', { v: t.v }), early: tx('Tu entres en avance ({v} ms)', { v: t.v }), more: tx('Plus d’énergie ici : le refrain doit s’ouvrir'), less: tx('Réduis : chante plus doucement ici'), emph: tx('Mets l’emphase sur « {w} »', { w: t.w }) }[t.k]}</span>)}</div>
+              {coachAi?.lines?.find((x) => x.i === i) && (() => { const a = coachAi.lines.find((x) => x.i === i); return <div className="coach-ai">{a.conseil}{a.emphase?.length ? ' · ' + tx('Emphase') + ' : ' + a.emphase.join(', ') : ''}{a.souffle ? ' · ' + tx('Respire') + ' : ' + a.souffle : ''}</div>; })()}
+            </div>)}
+            <button className="btn ai wide" style={{ marginTop: 8 }} disabled={!!busy || aiStatus?.ai === false} onClick={coachIa}>{busy === 'coachia' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Conseils détaillés de Sonyria (emphase, souffle, mixage)')}</button>
+            {coachAi && <div className="coach-sum">
+              <p>{coachAi.global}</p>
+              {coachAi.production?.length > 0 && <><b>{tx('Pour un son de hit')}</b><ul>{coachAi.production.map((x, k) => <li key={k}>{x}</li>)}</ul></>}
+              {coachAi.exercice && <><b>{tx('Exercice pour la prochaine prise')}</b><p>{coachAi.exercice}</p></>}
+            </div>}
+          </div>}
+        </div>}
         {song.tracks.map((t) => (
           <div key={t.id} className="track">
             <div className="row nw">

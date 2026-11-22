@@ -83,6 +83,24 @@ ${p.lyrics || ''}
 Lignes (i, section, nuance, texte, mesures, syllabes) :
 ${JSON.stringify(p.lines)}`;
   }
+  if (task === 'coach') {
+    return `Tu es professeur de chant ET réalisateur vocal (vocal producer) de studio. Tu aides un artiste à transformer sa prise en un succès.
+Connaissances à appliquer :
+- Phrasé : le phrasé, c'est faire bouger les notes avec la musique grâce au souffle et aux nuances (où l'on respire, où l'on chante plus fort ou plus doux).
+- Emphase : mets l'accent sur les mots qui portent l'émotion et le sens, comme quand on parle; enlève l'accent des petits mots (le, la, et, mais, un…); place les mots forts sur les temps forts.
+- Nuances : un texte fâché ne se chante pas doucement, un texte triste et seul ne se chante pas fort; les sections doivent construire l'énergie (couplets plus retenus, refrain qui s'ouvre, pont plus intime, dernier refrain le plus fort).
+- Souffle : prévoir les respirations entre les phrases, soutenir jusqu'à la fin des notes longues; la justesse dépend du souffle.
+- Justesse : ± 35 cents est acceptable; au-delà, viser la note; une courbe instable = soutien du souffle.
+- Production : doubler la voix principale sur les refrains, harmonies (tierce, quinte) sur les phrases accrocheuses, échos et délais en fin de phrase pour agrandir le refrain, garder les back vocals plus bas et plus larges que la voix principale, couper les respirations trop fortes.
+Données mesurées par l'app pour chaque ligne (cents = écart de justesse moyen, late = retard en ms au début de la ligne, db = volume, voiced = part des notes chantées) :
+${JSON.stringify(p.lines)}
+Résumé : justesse ${p.pitchScore ?? '?'} %, rythme ${p.timeScore ?? '?'} %, différence refrain - couplets ${p.chorusGain ?? '?'} dB. Style : ${p.style}, ${p.bpm} BPM.
+Paroles complètes :
+${p.lyrics}
+
+Réponds UNIQUEMENT avec ce JSON :
+{"global":"2 ou 3 phrases d'encouragement et la priorité n° 1","lines":[{"i":0,"emphase":["mot"],"souffle":"où respirer (ex. avant « mot »)","conseil":"une phrase concrète : plus d'emphase, réduire, tenir la note…"}],"production":["3 à 5 conseils de mixage précis pour cette chanson"],"exercice":"un court exercice pour la prochaine prise"}`;
+  }
   if (task === 'clip') {
     return `Tu es réalisateur de vidéoclips. À partir de ces paroles, écris le scénario visuel d'un clip animé (généré par code : fonds animés, particules, spectre audio, paroles karaoké).
 Thèmes visuels disponibles (utilise seulement le mot-clé avant la parenthèse) : ${THEMES.join(', ')}. Choisis des thèmes réalistes qui collent à l’imaginaire de chaque section et varie-les d’une section à l’autre. Palettes : 3 couleurs hexadécimales vives qui vont bien sur fond noir.
@@ -130,7 +148,7 @@ export async function POST(req) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' || task === 'polish' || task === 'ocr' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' || task === 'polish' || task === 'ocr' || task === 'coach' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
     });
     const j = await r.json();
     if (!r.ok) return Response.json({ error: j?.error?.message || 'Erreur Anthropic' }, { status: r.status });
