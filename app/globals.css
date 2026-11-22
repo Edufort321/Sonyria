@@ -297,3 +297,34 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .inst-bar b { display: block; font-size: 14px; }
 .inst-bar small { color: var(--dim); font-size: 12px; line-height: 1.35; display: block; }
 @keyframes instIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+
+/* ===== Header (modèle ZERVIA) : barre pleine largeur, logo à gauche, FR | EN à droite ===== */
+.topbar { position: sticky; top: 0; z-index: 30; background: linear-gradient(180deg, #171131 0%, #07050f 100%); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); border-bottom: 1px solid rgba(140, 120, 255, 0.18); padding-top: var(--safe-t); }
+.topbar::before { content: ''; display: block; height: 3px; background: var(--grad); opacity: 0.9; }
+.topbar .bar { max-width: 820px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 14px 8px; }
+.tlogo { width: 50px; height: 50px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.55), 0 0 22px rgba(34, 211, 238, 0.3); transition: width 0.2s, height 0.2s; object-fit: cover; }
+.tbrand { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.tapp { font: 800 11px/1 Sora, sans-serif; letter-spacing: 0.32em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 3px; }
+.ttitle { font: 700 18px/1.15 Sora, sans-serif; color: #f2f1ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: font-size 0.2s; }
+.tsub { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.tacts { display: flex; align-items: center; gap: 4px; flex: none; }
+.tib { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; padding: 0; }
+.tib:active { background: rgba(255, 255, 255, 0.06); }
+.tav { width: 34px; height: 34px; border-radius: 50%; padding: 0; overflow: hidden; border: 2px solid transparent; background: linear-gradient(#0b0918, #0b0918) padding-box, var(--grad) border-box; }
+.tav img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tlang { display: flex; margin-left: 4px; padding: 3px; border-radius: 11px; background: rgba(5, 4, 14, 0.7); border: 1px solid var(--line); }
+.tlang button { padding: 6px 9px; border-radius: 8px; font: 700 12px/1 Sora, sans-serif; color: var(--dim); letter-spacing: 0.04em; }
+.tlang button.on { background: var(--grad2); color: #fff; box-shadow: 0 0 10px rgba(168, 85, 247, 0.45); }
+.topbar .tabs { position: static; max-width: 820px; margin: 0 auto; padding: 0 14px 10px; background: none; }
+.topbar.compact .tlogo { width: 34px; height: 34px; }
+.topbar.compact .tapp, .topbar.compact .tsub { display: none; }
+.topbar.compact .ttitle { font-size: 16px; }
+.topbar.compact .bar { padding-top: 6px; padding-bottom: 4px; }
+.topbar.compact .tabs { padding-bottom: 6px; }
+.topbar.compact .tab { padding: 5px 2px; }
+.topbar.compact .tab span { height: 22px; }
+.topbar.compact .tab .ico { width: 22px; height: 22px; }
+.app { padding-top: 6px; }
+@media (max-width: 400px) { .tlogo { width: 42px; height: 42px; } .ttitle { font-size: 16px; } .tib { width: 32px; } .tib .ico { width: 23px; height: 23px; } .tlang button { padding: 6px 7px; } }
+/* bannière d'installation : au-dessus de la barre de lecture */
+.inst-bar { top: auto; bottom: calc(96px + var(--safe-b)); }

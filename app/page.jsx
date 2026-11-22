@@ -89,6 +89,7 @@ export default function Page() {
   const [code, setCode] = useState('');
   const [install, setInstall] = useState(null);
   const [installUI, setInstallUI] = useState(null);
+  const [compact, setCompact] = useState(false);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
   const [exporting, setExporting] = useState('');
@@ -160,6 +161,8 @@ export default function Page() {
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
+    const onScroll = () => setCompact(window.scrollY > 40);
+    window.addEventListener('scroll', onScroll, { passive: true });
     const off = onLang((l) => { setLangState(l); bump(); });
     // l'événement est capté tôt dans layout.js (sans preventDefault, la bannière native de Chrome reste)
     const bip = () => setInstall(window.__bip || null);
@@ -169,7 +172,7 @@ export default function Page() {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !/crios|fxios/i.test(navigator.userAgent);
     let dismissed = false; try { dismissed = sessionStorage.getItem('sonyria-inst-x') === '1'; } catch (e) {}
     setInstallUI({ standalone, ios, dismissed });
-    return () => { off(); window.removeEventListener('sonyria-bip', bip); };
+    return () => { off(); window.removeEventListener('sonyria-bip', bip); window.removeEventListener('scroll', onScroll); };
   }, []); // eslint-disable-line
 
   // horloge (karaoké, grille, position)
@@ -542,7 +545,7 @@ export default function Page() {
   const TABS = [['paroles', 'new', 'Paroles'], ['melodie', 'note', 'Mélodie'], ['beat', 'drumkit', 'Beat'], ['studio', 'studio-mic', 'Studio'], ['table', 'sliders', 'Table'], ['clip', 'spectrum', 'Clip']];
 
   return (
-    <div className="app">
+    <>
       <IconDefs />
       {splash && <Splash onDone={() => setSplash(false)} />}
       {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={doInstall}
@@ -552,20 +555,29 @@ export default function Page() {
           else if (choice === 'import') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('studio'); }
           else { const n = newSong(getLang() === 'en' ? DEMO_EN : DEMO); n.artist = me.artist || me.name || ''; load(n); setTab('melodie'); }
         }} />}
-      <header className="hdr">
-        <img src="/logo.png" alt="Sonyria" />
-        <div className="brand">Sonyria<small>{me?.name ? tx('Salut, {n}', { n: me.name }) : tx('Studio de chansons')}</small></div>
-        <div className="sp" />
-        {install && !installUI?.standalone && <button className="install" onClick={doInstall}>{tx("Installer")}</button>}
-        <button className="lang-btn" onClick={() => setLang(lang === 'fr' ? 'en' : 'fr')} title="Français / English"><b className={lang === 'fr' ? 'on' : ''}>FR</b><b className={lang === 'en' ? 'on' : ''}>EN</b></button>
-        {me?.av && <button className="avatar-btn" onClick={() => setSheet({ type: 'profile' })} title={tx("Mon profil")}><img src={avSrc(me.av)} alt="" /></button>}
-        <button className="icon-btn" onClick={() => setSheet({ type: 'songs' })} title={tx("Mes chansons")}><Ico n="folder" s={30} /></button>
-        <button className="icon-btn" onClick={() => setSheet({ type: 'settings' })} title={tx("Réglages")}><Ico n="settings" s={30} /></button>
-      </header>
-
-      <nav className="tabs">
-        {TABS.map(([k, e, n]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}><span><Ico n={e} s={30} dim={tab !== k} /></span>{tx(n)}</button>)}
-      </nav>
+      <div className={'topbar' + (compact ? ' compact' : '')}>
+        <div className="bar">
+          <img className="tlogo" src="/logo.png" alt="Sonyria" />
+          <div className="tbrand">
+            <span className="tapp">SONYRIA</span>
+            <span className="ttitle">{song.title || tx('Ma chanson')}</span>
+            <small className="tsub">{me?.name ? tx('Salut, {n}', { n: me.name }) : tx('Studio de chansons')}{song.artist ? ` · ${song.artist}` : ''}</small>
+          </div>
+          <div className="tacts">
+            <button className="tib" onClick={() => setSheet({ type: 'songs' })} title={tx('Mes chansons')} aria-label={tx('Mes chansons')}><Ico n="folder" s={26} /></button>
+            <button className="tib" onClick={() => setSheet({ type: 'settings' })} title={tx('Réglages')} aria-label={tx('Réglages')}><Ico n="settings" s={26} /></button>
+            {me?.av && <button className="tav" onClick={() => setSheet({ type: 'profile' })} title={tx('Mon profil')} aria-label={tx('Mon profil')}><img src={avSrc(me.av)} alt="" /></button>}
+            <div className="tlang" role="group" aria-label="Langue / Language">
+              <button className={lang === 'fr' ? 'on' : ''} onClick={() => setLang('fr')} aria-pressed={lang === 'fr'}>FR</button>
+              <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')} aria-pressed={lang === 'en'}>EN</button>
+            </div>
+          </div>
+        </div>
+        <nav className="tabs">
+          {TABS.map(([k, e, n]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}><span><Ico n={e} s={28} dim={tab !== k} /></span>{tx(n)}</button>)}
+        </nav>
+      </div>
+      <div className="app">
 
       {/* ================= PAROLES ================= */}
       {tab === 'paroles' && <>
@@ -928,7 +940,8 @@ export default function Page() {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
-    </div>
+      </div>
+    </>
   );
 }
 const confirmDel = { current: null };
