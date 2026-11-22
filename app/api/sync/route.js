@@ -12,7 +12,8 @@ const TOKEN = () => process.env.BLOB_READ_WRITE_TOKEN || Object.entries(process.
 export async function GET(req) {
   const token = TOKEN(), ready = !!token;
   const space = new URL(req.url).searchParams.get('space') || '';
-  if (!space) return Response.json({ ready }, { headers: H });
+  // diagnostic : noms des variables seulement (jamais les valeurs)
+  if (!space) return Response.json({ ready, vars: Object.keys(process.env).filter((k) => /BLOB|STORE|STORAGE/i.test(k)) }, { headers: H });
   if (!ready) return Response.json({ ready, error: 'not-configured' }, { status: 503, headers: H });
   if (!/^[a-f0-9]{64}$/.test(space)) return Response.json({ error: 'bad space' }, { status: 400, headers: H });
   const out = []; let cursor;
