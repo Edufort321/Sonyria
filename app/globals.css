@@ -546,3 +546,22 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .alb-cover.empty small { font-size: 10.5px; color: var(--dim); text-align: center; padding: 0 4px; }
 .cover-cv { width: 100%; max-width: 360px; aspect-ratio: 1; display: block; margin: 6px auto 4px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
 .chip .sw { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid rgba(255,255,255,.4); }
+/* ===== table de son : tout visible, portrait comme paysage ===== */
+.console { flex-wrap: wrap; overflow-x: visible; gap: 6px; justify-content: center; }
+.strip { flex: 1 1 0; min-width: 56px; max-width: 110px; padding: 8px 4px; gap: 4px; }
+.strip .sico img { width: clamp(22px, 5vh, 34px) !important; height: auto !important; }
+.strip .snm { font-size: 10px; height: 24px; }
+.fader { height: clamp(110px, 34vh, 220px); gap: 4px; }
+.fader input[type=range] { width: 24px; }
+.strip .imgtgl img { width: 24px !important; height: auto !important; }
+.strip .row.nw { gap: 2px !important; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .fader { height: clamp(90px, 38vh, 170px); }
+  .strip .snm { height: 14px; white-space: nowrap; text-overflow: ellipsis; }
+  .strip .sico { display: none; }
+  .fs-mix .fader { height: 46vh; }
+  .fs-bar { padding-top: 4px; padding-bottom: 4px; }
+  .fs-bar .play { width: 42px; height: 42px; }
+}
+.fs-mix .strip { flex: 1 1 0; max-width: 140px; }
+@media (orientation: portrait) and (max-width: 600px) { .fs-mix .fader { height: clamp(140px, 28vh, 300px); } }
