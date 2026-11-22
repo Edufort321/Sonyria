@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 43';
+const APP_VERSION = '2026.11.22 · 44';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -148,6 +148,7 @@ export default function Page() {
   const [ambRead, setAmbRead] = useState('');
   const [exporting, setExporting] = useState('');
   const [micOn, setMicOn] = useState(false);
+  const [recT0, setRecT0] = useState(0);
   const [polish, setPolish] = useState(null);
   const [progress, setProgress] = useState('');
   const [splash, setSplash] = useState(true);
@@ -532,7 +533,7 @@ export default function Page() {
     keepAwake();
     const pos = e.play(song, { from: recFrom, to: recTo ?? undefined, countIn: song.countIn ? 1 : 0, loop: false, onEnd: () => finishRec() });
     if (!pos) return;
-    e.startRecording();
+    e.startRecording(); setRecT0(performance.now());
     recInfo.current = { t0: pos.t0, fromSec: pos.fromSec };
     setRec(true); setPlaying(true);
     if (song.karaRec) setKara(true);
@@ -1385,7 +1386,7 @@ export default function Page() {
         </div>
         <div className="card">
           <h3><Ico n="studio-mic" s={30} /> {tx("Enregistrement")}</h3>
-          {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Activer le micro")}</button> : <MicMeter eng={eng} />}
+          {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Test de son : activer le micro")}</button> : <MicMeter eng={eng} rec={rec} t0={recT0} />}
           <Sub k="rec-opt" t={tx('Quoi enregistrer : toute la chanson ou section par section')} open>
           <div className="row" style={{ marginTop: 10 }}>
             <div className="grow" style={{ flexBasis: '100%' }}>
@@ -1684,6 +1685,7 @@ export default function Page() {
         <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : startRec())} aria-label={tx("Enregistrer")}>{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
       </div></div>
 
+      {rec && <div className={"rec-console" + (kara ? " on-kara" : "")}><MicMeter eng={eng} rec compact t0={recT0} /><button className="btn sm" onClick={finishRec}>■ {tx('Arrêter')}</button></div>}
       {cam && <CamStudio song={song} tl={tl} eng={eng} ensureAudio={ensureAudio} play={play} stop={() => { eng.current?.stop(); setPlaying(false); }} onDone={onFilmed} onClose={() => setCam(false)} scenario={scenario} photos={() => photos.current} onPhotos={async (files) => { photos.current = (await Promise.all(files.slice(0, 12).map(loadImage))).filter(Boolean); bump(); }} />}
       {kara && <Karaoke song={song} tl={tl} eng={eng} playing={playing} rec={rec} onClose={() => setKara(false)} onPlay={() => (playing ? stop() : play({ from: 0 }))} onRec={() => (rec ? finishRec() : startRec())} />}
 
@@ -2334,14 +2336,54 @@ function HumBeat({ eng }) {
   );
 }
 
-function MicMeter({ eng }) {
-  const [lv, setLv] = useState(0);
+// console du micro : on voit sa voix arriver (onde + niveau + conseil), avant et pendant l'enregistrement
+function MicMeter({ eng, compact, rec, t0 }) {
+  const cv = useRef(null), hist = useRef(new Float32Array(160)), st = useRef({ peak: 0, last: 0, silent: 0 });
+  const [info, setInfo] = useState({ lv: 0, msg: '', k: 'none', time: 0 });
+  const [test, setTest] = useState('');
   useEffect(() => {
-    let raf; const d = new Uint8Array(512);
-    const f = () => { const a = eng.current?.micAnalyser; if (a) { a.getByteTimeDomainData(d); let m = 0; for (let i = 0; i < d.length; i++) m = Math.max(m, Math.abs(d[i] - 128)); setLv(m / 128); } raf = requestAnimationFrame(f); };
+    let raf, n = 0; const d = new Float32Array(1024);
+    const f = () => {
+      const a = eng.current?.micAnalyser;
+      if (a) {
+        if (a.fftSize !== 1024) a.fftSize = 1024;
+        a.getFloatTimeDomainData(d); let pk = 0, sq = 0; for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); pk = Math.max(pk, v); sq += d[i] * d[i]; }
+        const rms = Math.sqrt(sq / d.length), h = hist.current; h.copyWithin(0, 1); h[h.length - 1] = pk;
+        const S = st.current; S.peak = Math.max(pk, S.peak * 0.97); S.silent = rms < 0.004 ? S.silent + 1 : 0;
+        const c = cv.current;
+        if (c) {
+          const g = c.getContext('2d'), W = (c.width = c.clientWidth * 2), H = (c.height = c.clientHeight * 2);
+          g.clearRect(0, 0, W, H); const bw = W / h.length;
+          for (let i = 0; i < h.length; i++) { const v = Math.min(1, h[i] * 1.6), hh = Math.max(2, v * H * 0.92); g.fillStyle = v > 0.92 ? '#ef4444' : v > 0.6 ? '#facc15' : v > 0.05 ? '#22d3ee' : 'rgba(255,255,255,.15)'; g.fillRect(i * bw, (H - hh) / 2, Math.max(1, bw - 1), hh); }
+        }
+        if (n++ % 8 === 0) {
+          const k = S.silent > 90 ? 'none' : S.peak > 0.95 ? 'hot' : S.peak < 0.06 ? 'low' : 'ok';
+          setInfo({ lv: Math.min(1, rms * 6), k, time: t0 ? (performance.now() - t0) / 1000 : 0 });
+        }
+      }
+      raf = requestAnimationFrame(f);
+    };
     f(); return () => cancelAnimationFrame(raf);
-  }, [eng]);
-  return <div><div className="hint"><Ic n="mic" size={13} /> {tx("Micro actif — niveau")}</div><div className="meter"><i style={{ width: Math.min(100, lv * 140) + '%' }} /></div></div>;
+  }, [eng, t0]);
+  const msg = { none: tx('Aucun son : parle ou chante… sinon vérifie le micro'), low: tx('Trop faible : rapproche-toi du micro'), hot: tx('Trop fort (ça sature) : recule un peu'), ok: tx('On t’entend bien ✓') }[info.k];
+  const quickTest = async () => {
+    const stream = eng.current?.micStream; if (!stream || typeof MediaRecorder === 'undefined') return;
+    setTest('rec'); const ch = []; const mr = new MediaRecorder(stream); mr.ondataavailable = (e) => e.data.size && ch.push(e.data);
+    mr.onstop = () => { const url = URL.createObjectURL(new Blob(ch, { type: mr.mimeType })); const au = new Audio(url); setTest('play'); au.onended = () => { setTest(''); URL.revokeObjectURL(url); }; au.play().catch(() => setTest('')); };
+    mr.start(); setTimeout(() => mr.state !== 'inactive' && mr.stop(), 3000);
+  };
+  const fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
+  return <div className={'micc ' + info.k + (compact ? ' compact' : '')}>
+    <div className="micc-top">
+      {rec ? <span className="micc-rec"><span className="rec-dot" /> REC {fmt(info.time)}</span> : <span className="micc-live"><Ic n="mic" size={13} /> {tx('Micro en direct')}</span>}
+      <span className={'micc-msg ' + info.k}>{msg}</span>
+    </div>
+    <canvas ref={cv} className="micc-wave" />
+    <div className="micc-bar"><i style={{ width: Math.round(info.lv * 100) + '%' }} /></div>
+    {!rec && !compact && <div className="row" style={{ marginTop: 6 }}>
+      <button className="btn sm" disabled={!!test} onClick={quickTest}>{test === 'rec' ? <><span className="rec-dot" /> {tx('Parle 3 secondes…')}</> : test === 'play' ? <><Ic n="play" /> {tx('Réécoute…')}</> : <><Ic n="mic" /> {tx('Test : parle 3 s et réécoute')}</>}</button>
+    </div>}
+  </div>;
 }
 
 function Mixer({ song, up, eng, playing, onFull }) {
