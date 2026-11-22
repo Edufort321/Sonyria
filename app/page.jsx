@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 40';
+const APP_VERSION = '2026.11.22 · 41';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -201,6 +201,7 @@ export default function Page() {
     bump(); save();
   };
   const load = (s) => {
+    if (eng.current?.recorder) finishRecRef.current?.();
     eng.current?.stop(); setPlaying(false);
     ensureLayers(s); S.current = s; setSel(null);
     if (videoBg.current) { videoBg.current.pause?.(); videoBg.current = null; }
@@ -213,15 +214,16 @@ export default function Page() {
   const syncing = useRef(false);
   useEffect(() => {
     const run = async () => {
-      if (syncing.current || document.hidden || !navigator.onLine) return;
+      if (syncing.current || document.hidden || !navigator.onLine || eng.current?.recorder || eng.current?.playing) return;
       const sps = loadSpaces(); if (!sps.length) return;
       syncing.current = true;
       try {
         const c = S.current;
         if (c?.lyrics?.trim()) { try { const old = await DB.getSong(c.id); if (!old || JSON.stringify(old.song?.lyrics) !== JSON.stringify(c.lyrics) || (old.updated || 0) < (c._edited || 0)) await DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {} }
         for (const sp of sps) {
-          const r = await syncSpace(sp, { me: loadMe() }).catch(() => null);
-          if (r?.pulled?.includes(S.current.id)) { const x = await DB.getSong(S.current.id); if (x?.song) { const d = newSong(''); load({ ...d, ...x.song, mix: { ...d.mix, ...x.song.mix }, clip: { ...d.clip, ...x.song.clip } }); } }
+          const r = await syncSpace(sp, { me: loadMe(), busyId: S.current.id }).catch(() => null);
+          if (r?.conflicts) say(tx('Synchro : une version d’un autre appareil a été gardée en copie dans ton album'));
+          if (false && r?.pulled?.includes(S.current.id)) { const x = await DB.getSong(S.current.id); if (x?.song) { const d = newSong(''); load({ ...d, ...x.song, mix: { ...d.mix, ...x.song.mix }, clip: { ...d.clip, ...x.song.clip } }); } }
           if (r && (r.pulled.length || r.removed)) say(tx('Synchro : {n} chanson(s) reçue(s)', { n: r.pulled.length }));
         }
       } finally { syncing.current = false; }
@@ -272,6 +274,7 @@ export default function Page() {
         if (typeof window !== 'undefined' && 'launchQueue' in window) window.launchQueue.setConsumer(async (p) => { const h = p.files?.[0]; if (!h) return; try { const { song: s } = await fileToSong(await h.getFile()); const d = newSong(''); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); } catch (e) {} });
       } catch (e) {}
     })();
+    window.__sonyriaReady = true;
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
     // en-tête compact avec marge (hystérésis) : il ne saute plus quand on est près du seuil
     let cmp = false, raf0 = 0;
@@ -514,8 +517,19 @@ export default function Page() {
     try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say(tx('Micro refusé : autorise le micro pour Sonyria dans le navigateur.')); return null; }
   };
   const sections = useMemo(() => { const o = []; tl.lines.forEach((l) => { const last = o[o.length - 1]; if (!last || last.fi !== l.fi) o.push({ fi: l.fi, label: l.label, from: l.b0, to: l.b0 + l.bars, inst: l.inst }); else last.to = l.b0 + l.bars; }); return o; }, [tl]);
+  const wake = useRef(null);
+  const keepAwake = async () => { try { if ('wakeLock' in navigator && !wake.current) { wake.current = await navigator.wakeLock.request('screen'); wake.current.addEventListener?.('release', () => { wake.current = null; }); } } catch (e) {} };
+  const releaseWake = () => { try { wake.current?.release(); } catch (e) {} wake.current = null; };
+  useEffect(() => {
+    const onHide = () => { if (document.hidden && eng.current?.recorder) { finishRecRef.current?.(); say(tx('Enregistrement sauvegardé (l’app est passée en arrière-plan)')); } else if (!document.hidden && (eng.current?.playing || eng.current?.recorder)) keepAwake(); };
+    const onLeave = () => { if (eng.current?.recorder) finishRecRef.current?.(); };
+    document.addEventListener('visibilitychange', onHide); window.addEventListener('pagehide', onLeave);
+    return () => { document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', onLeave); };
+  }, []); // eslint-disable-line
+  const finishRecRef = useRef(null);
   const startRec = async () => {
     const e = await openMic(); if (!e) return;
+    keepAwake();
     const pos = e.play(song, { from: recFrom, to: recTo ?? undefined, countIn: song.countIn ? 1 : 0, loop: false, onEnd: () => finishRec() });
     if (!pos) return;
     e.startRecording();
@@ -524,15 +538,15 @@ export default function Page() {
     if (song.karaRec) setKara(true);
   };
   const finishRec = () => {
-    const e = eng.current; if (!e) return;
+    const e = eng.current; if (!e || !e.recorder) { setRec(false); return; }
     const r = e.stopRecording(); e.stop(); setRec(false); setPlaying(false);
     if (!r) return;
     const lat = song.latency ?? Math.round(e.latency() * 1000);
     let st = recInfo.current.fromSec + (r.ctxStart - recInfo.current.t0) - lat / 1000;
     let buffer = r.buffer;
     if (st < 0) {
-      const cut = Math.floor(-st * buffer.sampleRate);
-      if (cut >= buffer.length - 100) return;
+      let cut = Math.floor(-st * buffer.sampleRate);
+      if (cut >= buffer.length - 100) cut = 0;
       const nb = e.ctx.createBuffer(1, buffer.length - cut, buffer.sampleRate);
       nb.getChannelData(0).set(buffer.getChannelData(0).subarray(cut)); buffer = nb; st = 0;
     }
@@ -541,9 +555,13 @@ export default function Page() {
     const range = recTo == null && recFrom === 0 ? tx('toute la chanson') : `${M.localLabel(secA?.label || '') || tx('début')} → ${recTo == null ? tx('fin') : M.localLabel(secB?.label || '')}`;
     up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
     say(tx('Prise enregistrée')); snapshot(tx('Nouvelle prise de voix'));
+    releaseWake();
+    // sauvegarde tout de suite (pas d'attente) pour ne jamais perdre une prise
+    try { const c = S.current; DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {}
     // enregistrement progressif : on passe à la section suivante
     if (recMode === 'sec' && recTo != null) { const i = sections.findIndex((x) => x.to === recTo); const nx = sections[i + 1]; if (nx) { setRecFrom(nx.from); setRecTo(nx.to); say(tx('Prochaine section prête : {n}', { n: M.localLabel(nx.label) })); } }
   };
+  finishRecRef.current = finishRec;
   const setVideoBg = (file) => {
     if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
     const vd = document.createElement('video'); vd.src = URL.createObjectURL(file); vd.muted = true; vd.playsInline = true; vd.loop = true; vd.preload = 'auto';
