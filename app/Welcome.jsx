@@ -90,7 +90,7 @@ export function Onboarding({ me, setMe, lang, setLang, install, onInstall, onFin
           <h2>{tx("Faisons connaissance")}</h2>
           <p className="lead">{tx("Ton prénom et ton nom d’artiste apparaissent dans tes clips et tes exports.")}</p>
           <label className="f">{tx("Ton prénom")}</label>
-          <input type="text" value={me.name || ''} placeholder="Eric" onChange={(e) => setMe({ ...me, name: e.target.value })} />
+          <input type="text" value={me.name || ''} placeholder={tx("Ton prénom")} onChange={(e) => setMe({ ...me, name: e.target.value })} />
           <label className="f">{tx("Nom d’artiste (facultatif)")}</label>
           <input type="text" value={me.artist || ''} placeholder={tx("Ton nom de scène")} onChange={(e) => setMe({ ...me, artist: e.target.value })} />
           <label className="f">{tx("Ton avatar")}</label>
