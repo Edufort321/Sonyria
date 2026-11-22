@@ -21,6 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
+const APP_VERSION = '2026.11.22 · 37';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -120,6 +121,8 @@ export default function Page() {
   const [hum, setHum] = useState({ mode: 'hum', metro: true, onLyrics: true, keepKey: false, instr: 'piano' });
   const [humRec, setHumRec] = useState(false);
   const [ocr, setOcr] = useState(null);
+  const ocrRef = useRef(null);
+  useEffect(() => { if (ocr && ocrRef.current) ocrRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [ocr?.pages]); // eslint-disable-line
   const [ocrFix, setOcrFix] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [fs, setFs] = useState(null);
@@ -382,8 +385,7 @@ export default function Page() {
     setBusy('ocr');
     try {
       if (txt && !imgs.length && !pdf && !docx) {
-        const t = (await txt.text()).replace(/\{\\[^}]*\}|\\[a-z]+\d* ?/g, '').trim();
-        addOcr(t, txt.name.replace(/\.[^.]+$/, ''), '');
+        for (const f of files.filter((x) => x.type.startsWith('text/') || /\.(txt|md|rtf)$/i.test(x.name))) { const t = (await f.text()).replace(/\{\\[^}]*\}|\\[a-z]+\d* ?/g, '').trim(); addOcr(t, f.name.replace(/\.[^.]+$/, ''), ''); }
       } else if (docx && !imgs.length && !pdf) {
         addOcr(await docxText(docx), docx.name.replace(/\.[^.]+$/, ''), '');
       } else if (pdf) {
@@ -1071,14 +1073,14 @@ export default function Page() {
             <div className="hint">{tx('Plusieurs pages ? Sélectionne toutes les photos d’un coup, dans l’ordre.')}</div>
           </div>
           </Sub>
-          {ocr && <div className="card" style={{ borderColor: 'var(--cyan)' }}>
+          {ocr && <div className="card ocr-card" ref={ocrRef} style={{ borderColor: 'var(--cyan)' }}>
             <h3><Ico n="new" s={26} /> {tx('Texte importé')}</h3>
             {ocr.note && <div className="hint">{ocr.note}</div>}
             {ocr.title && <div className="hint">{tx('Titre')} : <b style={{ color: 'var(--txt)' }}>{ocr.title}</b></div>}
             <textarea value={ocr.lyrics} onChange={(e) => setOcr({ ...ocr, lyrics: e.target.value })} style={{ minHeight: 200 }} />
             <div className="row" style={{ marginTop: 8 }}>
               <span className="hint grow">{tx('{n} page(s) lue(s)', { n: ocr.pages || 1 })}</span>
-              <label className="btn sm"><Ic n="camera" /> {tx('Ajouter une page')}<input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
+              <label className="btn pri"><Ic n="camera" /> {tx('Photographier la page suivante')}<input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
               <label className="btn sm"><Ic n="file" /> {tx('Ajouter des fichiers')}<input type="file" accept="image/*,.pdf,.txt,.md,.docx" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
             </div>
             {busy === 'ocr' && <div className="row"><Magic kind="ocr" /> <span className="hint">{progress}</span></div>}
@@ -1104,6 +1106,7 @@ export default function Page() {
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
             <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = freshFrom(song, true); n.id = song.id; load(n); say(tx('Page blanche — on garde ton style')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
+            {song.lyrics.trim() && <label className="btn sm pri"><Ic n="camera" /> {tx('Ajouter des pages')}<input type="file" accept="image/*" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>}
             <button className="btn sm" onClick={() => setSheet({ type: 'versions', id: song.id })}><Ico n="folder" s={18} /> {tx('Versions')}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
@@ -1611,6 +1614,7 @@ export default function Page() {
           <label className="f">{tx("Profil")}</label>
           <div className="row"><button className="btn sm" onClick={() => setSheet({ type: 'profile' })}><Ic n="user" /> {tx("Prénom, nom d’artiste, avatar")}</button><button className="btn sm" onClick={() => { setMe({ ...me, onboarded: false }); setSheet(null); }}><Ic n="undo" /> {tx("Revoir l’accueil")}</button></div>
           <SyncPanel me={me} say={say} song={song} onPulled={async (ids) => { if (ids.includes(song.id)) { const r = await DB.getSong(song.id); if (r?.song) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } } }} />
+          <div className="hint">{tx('Version de l’app')} : {APP_VERSION}</div>
           <label className="f">{tx('Crédits des sons')}</label>
           <div className="hint">{tx('Vrais instruments enregistrés, sous licences libres :')} Splendid Grand Piano (domaine public), Rhodes J. Learman, VCSL, D. Smolken (CC0), FluidR3_GM – Frank Wen (MIT) / B. Gleitzman (CC BY 3.0), Pearl Master Studio – enoe (CC BY 3.0), LinnDrum (domaine public), TR-808 – Michael Fischer. <a href="/samples/CREDITS.txt" target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>{tx('Détails')}</a></div>
           <label className="f">{tx("Installer l’app")}</label>
