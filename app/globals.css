@@ -600,3 +600,5 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .real-it.on { border-color: var(--cyan); box-shadow: 0 0 12px rgba(34,211,238,.6); }
 .mini-thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mini-thumbs img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.ontop { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(168,85,247,.07); border: 1px solid rgba(168,85,247,.3); }
+.chip.emo { font-size: 18px; padding: 4px 9px; }

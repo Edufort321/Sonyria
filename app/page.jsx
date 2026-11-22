@@ -1311,10 +1311,11 @@ export default function Page() {
               {photos.current.length > 0 && <button className="btn sm" onClick={() => { photos.current = []; bump(); }}><Ico n="trash" s={18} /> {tx('Retirer')}</button>}
             </div>
             {photos.current.length > 0 && <div className="mini-thumbs">{photos.current.map((im, i) => <img key={i} src={im.src} alt="" />)}</div>}
+            <OnTop song={song} up={up} />
             <div className="hint" style={{ marginTop: 6 }}>{tx('Jusqu’à 12 photos : elles défilent une par ligne de paroles, avec un léger mouvement. Tu peux ajouter des effets dans Visuel.')}</div>
-          </div> : decor !== 'anim' ? <RealMedia kind={decor} orient={song.clip.format === '16:9' ? 'landscape' : song.clip.format === '1:1' ? 'square' : 'portrait'} say={say}
+          </div> : decor !== 'anim' ? <><RealMedia kind={decor} orient={song.clip.format === '16:9' ? 'landscape' : song.clip.format === '1:1' ? 'square' : 'portrait'} say={say}
             onVideo={(blob) => { attachVideo(blob, { vMode: 'plein', vLoop: true, vSound: 'app', cutout: false, mirror: false }).then(() => say(tx('Vidéo réelle ajoutée au clip'))); }}
-            onPhotos={async (blobs) => { photos.current = (await Promise.all(blobs.map((b) => loadImage(b)))).filter(Boolean); if (videoBg.current) removeVideo(); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /> : <>
+            onPhotos={async (blobs) => { photos.current = (await Promise.all(blobs.map((b) => loadImage(b)))).filter(Boolean); if (videoBg.current) removeVideo(); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /><OnTop song={song} up={up} /></> : <>
           <label className="f">{tx("Décor animé")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
           <div className="chips cats">{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + ((themeCat || THEMES[scenario.theme]?.c || 'lum') === k ? ' on' : '')} onClick={() => setThemeCat(k)}>{tx(n)}</button>)}</div>
           <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c !== 'old').filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
@@ -1809,6 +1810,21 @@ function RealMedia({ kind, orient, onVideo, onPhotos, say }) {
     </div>)}
     {kind === 'photo' && picked.length > 0 && <button className="btn pri wide" style={{ marginTop: 8 }} disabled={busy === 'photos'} onClick={usePhotos}>{busy === 'photos' ? <span className="busy" /> : <Ic n="check" />} {tx('Utiliser {n} photo(s) en fond', { n: picked.length })}</button>}
     <div className="hint" style={{ marginTop: 6 }}>{kind === 'video' ? tx('Touche une vidéo : elle devient le fond de ton clip, tes paroles par-dessus.') : tx('Choisis jusqu’à 12 photos : elles défilent une par ligne de paroles.')} {tx('Vidéos et photos de Pexels, libres de droits.')}</div>
+  </div>;
+}
+
+const STICKERS = ['❤️', '✨', '🔥', '🎵', '⭐', '🌸', '🦋', '💜', '🌙', '☀️', '🎉', '💫'];
+function OnTop({ song, up }) {
+  const c = song.clip;
+  return <div className="ontop">
+    <label className="row nw" style={{ fontSize: 13 }}><input type="checkbox" checked={c.pure !== false} onChange={(e) => up((s) => (s.clip.pure = e.target.checked))} /> {tx('Juste mon image (sans décor animé par-dessus)')}</label>
+    <label className="f">{tx('Ajouter par-dessus')}</label>
+    <div className="chips">{STICKERS.map((em) => { const on = (c.stickers || []).includes(em); return <button key={em} className={'chip emo' + (on ? ' on' : '')} onClick={() => up((s) => { const a = s.clip.stickers || []; s.clip.stickers = on ? a.filter((x) => x !== em) : [...a, em].slice(-4); })}>{em}</button>; })}</div>
+    <div className="row nw" style={{ marginTop: 6 }}>
+      <input type="text" value={c.caption?.text || ''} onChange={(e) => up((s) => (s.clip.caption = { ...(s.clip.caption || {}), text: e.target.value }))} placeholder={tx('Texte par-dessus (ex. Bonne fête maman)')} />
+      <select value={c.caption?.pos || 'haut'} onChange={(e) => up((s) => (s.clip.caption = { ...(s.clip.caption || {}), pos: e.target.value }))} style={{ maxWidth: 110 }}><option value="haut">{tx('En haut')}</option><option value="centre">{tx('Au centre')}</option></select>
+    </div>
+    <div className="hint" style={{ marginTop: 6 }}>{tx('Pour les filtres et effets (grain, lumière, confettis…), ouvre « Visuel : couleurs et effets » plus bas.')}</div>
   </div>;
 }
 
