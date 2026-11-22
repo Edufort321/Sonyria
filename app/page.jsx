@@ -8,6 +8,7 @@ import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } 
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
 import { imageToJpeg, toB64, docxText } from '@/lib/importText';
+import { renderScore, chordSheet } from '@/lib/score';
 import * as DB from '@/lib/storage';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
@@ -98,6 +99,7 @@ export default function Page() {
   const [humRec, setHumRec] = useState(false);
   const [ocr, setOcr] = useState(null);
   const [ocrFix, setOcrFix] = useState(true);
+  const [printOpen, setPrintOpen] = useState(false);
   const humInfo = useRef(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
@@ -717,6 +719,7 @@ export default function Page() {
               <button className="btn" onClick={() => setPolish(null)}>{tx("Garder la mienne")}</button>
             </div>
           </div>}
+          <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setPrintOpen(true)}><Ico n="treble" s={18} /> {tx('Imprimer paroles et partition')}</button>
           <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })}</div>
         </div>
 
@@ -766,7 +769,7 @@ export default function Page() {
       {/* ================= MÉLODIE ================= */}
       {tab === 'melodie' && <>
         <div className="card">
-          <h3><Ico n="treble" s={28} /> {tx("Propositions de mélodie")}<span className="sp" /><button className="btn sm" onClick={copySheet}><Ic n="copy" /> {tx("Grille")}</button></h3>
+          <h3><Ico n="treble" s={28} /> {tx("Propositions de mélodie")}<span className="sp" /><button className="btn sm" onClick={copySheet}><Ic n="copy" /> {tx("Grille")}</button><button className="btn sm pri" onClick={() => setPrintOpen(true)}><Ico n="treble" s={18} /> {tx('Partition')}</button></h3>
           <div className="chips">
             {[0, 1, 2, 3].map((n) => <button key={n} className={'chip' + (song.variant === n ? ' on' : '')} onClick={() => { up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}>{tx('Proposition {n}', { n: 'ABCD'[n] })}</button>)}
             <button className="chip" onClick={() => { const n = 4 + Math.floor(Math.random() * 1000); up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}><Ic n="dice" /> {tx("Autre")}</button>
@@ -1078,6 +1081,7 @@ export default function Page() {
         </div>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {printOpen && <PrintView song={song} me={me} onClose={() => setPrintOpen(false)} />}
       </div>
     </>
   );
@@ -1127,6 +1131,48 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+function PrintView({ song, me, onClose }) {
+  const [mode, setMode] = useState('score');
+  const [busy, setBusy] = useState(true);
+  const ref = useRef(null);
+  const fr = song.fr;
+  useEffect(() => {
+    if (mode !== 'score' || !ref.current) { setBusy(false); return; }
+    setBusy(true);
+    renderScore(ref.current, song, { width: Math.min(760, ref.current.clientWidth || 760), fr }).catch((e) => { ref.current.textContent = String(e); }).finally(() => setBusy(false));
+  }, [mode]); // eslint-disable-line
+  const sheet = mode === 'chords' ? chordSheet(song, fr) : null;
+  const keyName = `${(fr ? M.NOTE_FR : M.NOTE_EN)[song.key]} ${tx(song.mode === 'maj' ? 'majeur' : 'mineur')}`;
+  return (
+    <div className="printview">
+      <div className="pv-bar no-print">
+        <div className="seg3">
+          <button className={mode === 'score' ? 'on' : ''} onClick={() => setMode('score')}>{tx('Partition complète')}</button>
+          <button className={mode === 'chords' ? 'on' : ''} onClick={() => setMode('chords')}>{tx('Paroles + accords')}</button>
+          <button className={mode === 'lyrics' ? 'on' : ''} onClick={() => setMode('lyrics')}>{tx('Paroles seules')}</button>
+        </div>
+        <span className="grow" />
+        <button className="btn sm pri" onClick={() => window.print()}><Ic n="download" /> {tx('Imprimer / PDF')}</button>
+        <button className="btn sm" onClick={onClose}><Ic n="x" /></button>
+      </div>
+      <div className="sheet-page">
+        <div className="sc-head">
+          <h1>{song.title}</h1>
+          <div className="sc-by">{tx('Paroles et musique')} : {song.artist || me?.artist || me?.name || '—'}</div>
+          <div className="sc-meta">{tx(M.STYLES[song.style].n)} · ♩ = {song.bpm} · {tx('Tonalité')} : {keyName}</div>
+        </div>
+        {mode === 'score' && <>{busy && <div className="no-print hint"><span className="busy" /> {tx('Gravure de la partition…')}</div>}<div ref={ref} className="sc-score" /></>}
+        {mode === 'chords' && sheet.map((b, i) => (
+          <div key={i} className="cs-block"><div className="sc-sec">{b.label}</div>
+            {b.lines.map((l, j) => <div key={j} className="cs-line">{l.map((s, k) => <span key={k} className={'cs-syl' + (s.end ? ' we' : '')}><b>{s.chord || '\u00a0'}</b>{s.t}</span>)}</div>)}
+          </div>))}
+        {mode === 'lyrics' && song.blocks.map((b, i) => <div key={i} className="cs-block"><div className="sc-sec">{M.localLabel(b.label)}</div>{b.lines.map((l, j) => <div key={j} className="ly-line">{l.text}</div>)}</div>)}
+        <div className="sc-foot">Sonyria · sonyria.vercel.app</div>
+      </div>
+    </div>
+  );
 }
 
 const MAGIC = {
