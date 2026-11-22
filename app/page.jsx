@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime } from '@/lib/engine';
-import { ClipRenderer, THEMES, FORMATS, defaultScenario, loadImage } from '@/lib/video';
+import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
+import { separate, analyzeMusic, transcribe, buildSong } from '@/lib/analyze';
 import * as DB from '@/lib/storage';
 
 const DEMO = `[Couplet]
@@ -77,6 +78,9 @@ export default function Page() {
   const [exporting, setExporting] = useState('');
   const [micOn, setMicOn] = useState(false);
   const [polish, setPolish] = useState(null);
+  const [progress, setProgress] = useState('');
+  const [range, setRange] = useState('all');
+  const videoBg = useRef(null);
   const [recFrom, setRecFrom] = useState(0);
   const eng = useRef(null);
   const recInfo = useRef(null);
@@ -297,7 +301,44 @@ export default function Page() {
     up((s) => s.tracks.push({ id: 't' + Date.now(), name: `Voix ${s.tracks.length + 1}`, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
     say('Prise enregistrée ✔');
   };
+  const setVideoBg = (file) => {
+    if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
+    const vd = document.createElement('video'); vd.src = URL.createObjectURL(file); vd.muted = true; vd.playsInline = true; vd.loop = true; vd.preload = 'auto';
+    vd.load(); videoBg.current = vd; bump();
+  };
+  const mkTrack = (s, name, data, sr, start, mute, fx = 'naturel') => s.tracks.push({ id: 't' + Date.now() + Math.random().toString(36).slice(2, 6), name, start, buffer: null, data, sr, vol: 0.9, pan: 0, fx, ...fxParams(fx), mute, solo: false });
+  // Importe un MP4/audio et recrée la chanson : paroles, tempo, tonalité, accords, mélodie, karaoké
+  const recreate = async (file) => {
+    const e = await ensureAudio();
+    setBusy('import');
+    try {
+      setProgress('Lecture du fichier…');
+      const buf = await e.ctx.decodeAudioData(await file.arrayBuffer());
+      if (file.type.startsWith('video/')) setVideoBg(file);
+      setProgress('Séparation voix / instrumental…'); await new Promise((r) => setTimeout(r, 30));
+      const sep = separate(buf);
+      setProgress('Tempo, tonalité et accords…'); await new Promise((r) => setTimeout(r, 30));
+      const A = analyzeMusic(sep.mono, sep.sr);
+      const segs = await transcribe(sep.voice, sep.sr, setProgress);
+      setProgress('Reconstruction de la mélodie et du karaoké…'); await new Promise((r) => setTimeout(r, 30));
+      const fresh = newSong('');
+      fresh.title = file.name.replace(/\.[^.]+$/, '').slice(0, 40);
+      buildSong(fresh, A, segs, sep.voice, sep.sr);
+      fresh.style = A.bpm < 86 ? 'ballade' : A.bpm > 125 ? 'edm' : 'pop';
+      fresh.drums = M.drumPreset(M.STYLES[fresh.style].drums); fresh.swing = 0;
+      mkTrack(fresh, 'Original', sep.mono, sep.sr, -A.phase, false);
+      if (sep.inst) mkTrack(fresh, 'Instrumental (voix retirée)', sep.inst, sep.sr, -A.phase, true);
+      if (sep.stereo) mkTrack(fresh, 'Voix (approx.)', sep.voice, sep.sr, -A.phase, true, 'studio');
+      fresh.mix.mute = { lead: false, harm: false, chords: true, bass: true, drums: true };
+      load(fresh);
+      setTab('melodie');
+      say(`Chanson recréée : ${A.bpm} BPM, ${M.NOTE_FR[A.key]} ${A.mode === 'maj' ? 'majeur' : 'mineur'}, ${segs.length} phrases. Vérifie les paroles !`);
+    } catch (err) { say('Import impossible : ' + (err.message || err)); }
+    setProgress(''); setBusy('');
+  };
+  const detectTempo = (t) => { const b = M.detectBpm(t.data, t.sr); if (b) { up((s) => (s.bpm = b)); say(`Tempo détecté : ${b} BPM`); } else say('Tempo introuvable'); };
   const importAudio = async (file) => {
+    if (file.type.startsWith('video/')) setVideoBg(file);
     const e = await ensureAudio();
     try {
       const ab = await file.arrayBuffer();
@@ -391,7 +432,7 @@ export default function Page() {
       const cv = clipRef.current; const [W, H] = FORMATS[song.clip.format]; cv.width = W; cv.height = H;
       stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...as.getAudioTracks()]);
     } else stream = new MediaStream(as.getAudioTracks());
-    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 192_000 } : {});
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8_000_000, audioBitsPerSecond: 192_000 } : {});
     const chunks = [];
     mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
     mr.onstop = () => {
@@ -402,7 +443,15 @@ export default function Page() {
     };
     setExporting(video ? 'clip' : 'mp4');
     mr.start(500);
-    e.play(song, { from: 0, loop: false, onEnd: () => { setPlaying(false); setTimeout(() => mr.state !== 'inactive' && mr.stop(), 300); } });
+    const T = buildTimeline(song), barSec = 16 * s16(song.bpm);
+    const ch = T.lines.filter((l) => l.type === 'chorus');
+    let from = 0, to = T.bars.length;
+    if (range !== 'all' && ch.length) {
+      from = Math.max(0, ch[0].b0 - 1);
+      if (range === 'chorus') { const bi = ch[0].bi; const last = T.lines.filter((l) => l.bi === bi).pop(); to = last.b0 + last.bars + 1; }
+      else to = Math.min(T.bars.length, from + Math.ceil(+range / barSec));
+    } else if (range !== 'all') to = Math.min(T.bars.length, Math.ceil(+range / barSec));
+    e.play(song, { from, to, loop: false, onEnd: () => { setPlaying(false); setTimeout(() => mr.state !== 'inactive' && mr.stop(), 300); } });
     setPlaying(true);
     exportStop.current = () => { e.stop(); setPlaying(false); mr.state !== 'inactive' && mr.stop(); };
   };
@@ -418,11 +467,12 @@ export default function Page() {
     const [W, H] = FORMATS[song.clip.format];
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     if (!renderer.current || renderer.current.cv !== cv) renderer.current = new ClipRenderer(cv);
-    renderer.current.setup(scenario, photos.current);
+    renderer.current.setup(scenario, photos.current, videoBg.current);
     let raf; const freq = new Uint8Array(512);
     const f = () => {
       const e = eng.current; const st = e?.songTime();
       if (e) e.analyser.getByteFrequencyData(freq);
+      const vd = videoBg.current; if (vd) { if (e?.playing && vd.paused) vd.play().catch(() => {}); if (!e?.playing && !vd.paused) vd.pause(); }
       renderer.current.draw(st && !st.countIn ? st.t : (tl.lines[0]?.syl[0]?.g || 0) * s16(song.bpm) + 0.8, tl, song, e?.playing ? freq : null);
       raf = requestAnimationFrame(f);
     };
@@ -617,7 +667,7 @@ export default function Page() {
           <div className="chips" style={{ marginTop: 6 }}>
             <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}>🥁 Batterie</button>
             <button className={'chip' + (song.metronome ? ' on' : '')} onClick={() => up((s) => (s.metronome = !s.metronome))}>🔔 Métronome</button>
-            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => (s.intro = !s.intro))}>🎬 Intro + fin</button>
+            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introBars = null; s.introChords = null; })}>🎬 Intro + fin</button>
           </div>
         </div>
 
@@ -671,7 +721,14 @@ export default function Page() {
             : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> Arrêter l’enregistrement</button>}
           <div className="sl" style={{ marginTop: 10 }}><span>Latence</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
           <div className="hint">Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.</div>
-          <label className="btn sm" style={{ marginTop: 10 }}>📁 Importer un audio<input type="file" accept="audio/*" hidden onChange={(e) => e.target.files[0] && importAudio(e.target.files[0])} /></label>
+        </div>
+        <div className="card">
+          <h3>📥 Importer un MP4 ou un audio</h3>
+          {busy === 'import' ? <div className="row"><span className="busy" /> {progress}</div> : <div className="row">
+            <label className="btn ai">✨ Recréer la chanson<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && recreate(e.target.files[0])} /></label>
+            <label className="btn">📁 Ajouter comme piste<input type="file" accept="audio/*,video/*" hidden onChange={(e) => e.target.files[0] && importAudio(e.target.files[0])} /></label>
+          </div>}
+          <div className="hint" style={{ marginTop: 8 }}><b>Recréer</b> : l’app extrait les paroles (Whisper, dans ton téléphone), le tempo, la tonalité et les accords, sépare la voix de l’instrumental, puis rebâtit mélodie et karaoké. Tu retrouves l’original, l’instrumental et la voix dans la table de son. La 1re fois, le modèle de transcription (~80 Mo) se télécharge. Utilise des chansons dont tu as les droits.</div>
         </div>
 
         {!song.tracks.length && <div className="empty">Aucune prise pour l’instant.<br />Enregistre ta voix, une guitare ou ton rythme parlé 🎤</div>}
@@ -702,6 +759,7 @@ export default function Page() {
             </div>
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn sm ai" onClick={() => alignVoice(t)}>🎯 Caler le karaoké sur cette voix</button>
+              <button className="btn sm" onClick={() => detectTempo(t)}>⏱️ Tempo</button>
               <button className="btn sm" onClick={async () => { const e = await ensureAudio(); const bar = Math.floor(t.start / (16 * s16(song.bpm))); e.play(song, { from: bar, onEnd: () => setPlaying(false) }); setPlaying(true); }}>▶ Écouter</button>
             </div>
           </div>
@@ -717,12 +775,15 @@ export default function Page() {
         <div className="card">
           <h3>🎬 Vidéoclip animé</h3>
           <canvas ref={clipRef} className="clip-cv" />
-          <div className="chips" style={{ marginTop: 10 }}>{Object.keys(FORMATS).map((k) => <button key={k} className={'chip' + (song.clip.format === k ? ' on' : '')} onClick={() => up((s) => (s.clip.format = k))}>{k === '9:16' ? '📱 9:16' : k === '16:9' ? '🖥️ 16:9' : '⬛ 1:1'}</button>)}</div>
+          <label className="f">Format prêt à publier (1080p)</label>
+          <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{p.n} <small>{p.f}</small></button>)}</div>
           <label className="f">Thème visuel</label>
           <div className="chips">{Object.entries(THEMES).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{t.n}</button>)}</div>
           <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{n}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
             <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <span className="busy" /> : '✨'} Scénario IA</button>
+            <label className="btn">🎞️ Vidéo de fond<input type="file" accept="video/*" hidden onChange={(e) => e.target.files[0] && setVideoBg(e.target.files[0])} /></label>
+            {videoBg.current && <button className="btn sm" onClick={() => { videoBg.current = null; bump(); }}>✕ Vidéo</button>}
             <label className="btn">🖼️ Mes photos<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(`${photos.current.length} photo(s) ajoutée(s)`); }} /></label>
             {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}>↺ Thème simple</button>}
           </div>
@@ -733,12 +794,15 @@ export default function Page() {
           {exporting ? <>
             <div className="row"><span className="busy" /> Export {exporting === 'clip' ? 'du clip' : exporting === 'wav' ? 'WAV' : 'MP4'} en cours… garde l’écran allumé.</div>
             {exporting !== 'wav' && <button className="btn sm" style={{ marginTop: 8 }} onClick={() => exportStop.current?.()}>■ Arrêter et enregistrer</button>}
-          </> : <div className="row">
+          </> : <>
+          <label className="f">Partie à exporter</label>
+          <div className="chips" style={{ marginBottom: 10 }}>{[['all', 'Toute la chanson'], ['chorus', 'Le refrain'], ['30', '30 s'], ['60', '60 s']].map(([k, n]) => <button key={k} className={'chip' + (range === k ? ' on' : '')} onClick={() => setRange(k)}>{n}</button>)}</div>
+          <div className="row">
             <button className="btn pri" onClick={() => exportLive(true)}>🎬 Clip MP4</button>
             <button className="btn" onClick={() => exportLive(false)}>🎵 Audio MP4</button>
             <button className="btn" onClick={exportWav}>💿 WAV studio</button>
-          </div>}
-          <div className="hint" style={{ marginTop: 8 }}>Le clip et l’audio MP4 s’enregistrent en temps réel, pendant la durée de la chanson. Le WAV est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.</div>
+          </div></>}
+          <div className="hint" style={{ marginTop: 8 }}>Clip MP4 en H.264 + AAC, 1080p, 30 images/s : prêt pour TikTok, Reels, Shorts et YouTube. 30 s et 60 s partent du 1er refrain. L’export se fait en temps réel ; le WAV (chanson complète) est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.</div>
         </div>
       </>}
 
