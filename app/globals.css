@@ -328,3 +328,8 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 @media (max-width: 400px) { .tlogo { width: 42px; height: 42px; } .ttitle { font-size: 16px; } .tib { width: 32px; } .tib .ico { width: 23px; height: 23px; } .tlang button { padding: 6px 7px; } }
 /* bannière d'installation : au-dessus de la barre de lecture */
 .inst-bar { top: auto; bottom: calc(96px + var(--safe-b)); }
+/* accueil : même header que l'app */
+.welcome { padding: 0 0 calc(var(--safe-b) + 24px); }
+.welcome .wwrap { padding: 16px 16px 0; }
+.whero { padding-top: 2vh; }
+.wlogo { display: block; margin: 0 auto; }

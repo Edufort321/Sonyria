@@ -53,9 +53,24 @@ export function Onboarding({ me, setMe, lang, setLang, install, onInstall, onFin
   const quick = [...AVATARS.Adultes.slice(0, 8), ...AVATARS.Ados.slice(0, 3), ...AVATARS.Enfants.slice(0, 2)];
   return (
     <div className="welcome">
+      <div className="topbar">
+        <div className="bar">
+          <img className="tlogo" src="/logo.png" alt="Sonyria" />
+          <div className="tbrand">
+            <span className="tapp">SONYRIA</span>
+            <span className="ttitle">{tx('Bienvenue')}</span>
+            <small className="tsub">{tx('Studio de chansons')}</small>
+          </div>
+          <div className="tacts">
+            <div className="tlang" role="group" aria-label="Langue / Language">
+              <button className={lang === 'fr' ? 'on' : ''} onClick={() => setLang('fr')} aria-pressed={lang === 'fr'}>FR</button>
+              <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')} aria-pressed={lang === 'en'}>EN</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div className="wwrap">
         {st === 0 && <div className="whero">
-          <div className="wlang"><button className={lang === 'fr' ? 'on' : ''} onClick={() => setLang('fr')}>Français</button><button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>English</button></div>
           <img className="wlogo" src="/logo.png" alt="" />
           <div className="wname">SONYRIA</div>
           <p className="wtag">{tx("Colle tes paroles : Sonyria compose les mélodies, les accords et le beat. Tu chantes, tu mixes, tu publies.")}</p>
