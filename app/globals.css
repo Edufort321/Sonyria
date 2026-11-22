@@ -565,3 +565,16 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 }
 .fs-mix .strip { flex: 1 1 0; max-width: 140px; }
 @media (orientation: portrait) and (max-width: 600px) { .fs-mix .fader { height: clamp(140px, 28vh, 300px); } }
+/* ===== versions + synchro ===== */
+.vers { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ver { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255,255,255,.02); }
+.ver.original { border-color: rgba(250,204,21,.5); background: rgba(250,204,21,.06); }
+.ver.named { border-color: rgba(34,211,238,.4); }
+.ver b { display: block; font-size: 14px; }
+.ver small { display: block; font-size: 11.5px; color: var(--dim); }
+.sync-box { margin-top: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255,255,255,.02); }
+.sync-box > b { display: flex; align-items: center; gap: 6px; }
+.sync-row { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.sync-row small { color: var(--dim); font-size: 11.5px; }
+.sync-row .col { display: flex; flex-direction: column; gap: 4px; }
+.sync-code { font: 700 17px 'JetBrains Mono', monospace; letter-spacing: 2px; margin: 4px 0; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; cursor: pointer; }

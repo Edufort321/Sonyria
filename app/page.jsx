@@ -14,6 +14,7 @@ import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
 import { makeBacking, BACKS } from '@/lib/backing';
+import { newCode, prettyCode, normCode, loadSpaces, saveSpaces, syncSpace, syncReady, peekSpace } from '@/lib/sync';
 import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/lib/cover';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
@@ -195,6 +196,29 @@ export default function Page() {
     if (eng.current) s.tracks.forEach((t) => { t.buffer = t.data ? storeToBuffer(eng.current.ctx, { sr: t.sr, ch: [t.data] }) : null; });
     bump();
   };
+
+  // ---------- synchro automatique (mes appareils + équipes) ----------
+  const syncing = useRef(false);
+  useEffect(() => {
+    const run = async () => {
+      if (syncing.current || document.hidden || !navigator.onLine) return;
+      const sps = loadSpaces(); if (!sps.length) return;
+      syncing.current = true;
+      try {
+        const c = S.current;
+        if (c?.lyrics?.trim()) { try { const old = await DB.getSong(c.id); if (!old || JSON.stringify(old.song?.lyrics) !== JSON.stringify(c.lyrics) || (old.updated || 0) < (c._edited || 0)) await DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {} }
+        for (const sp of sps) {
+          const r = await syncSpace(sp, { me: loadMe() }).catch(() => null);
+          if (r?.pulled?.includes(S.current.id)) { const x = await DB.getSong(S.current.id); if (x?.song) { const d = newSong(''); load({ ...d, ...x.song, mix: { ...d.mix, ...x.song.mix }, clip: { ...d.clip, ...x.song.clip } }); } }
+          if (r && (r.pulled.length || r.removed)) say(tx('Synchro : {n} chanson(s) reçue(s)', { n: r.pulled.length }));
+        }
+      } finally { syncing.current = false; }
+    };
+    const t0 = setTimeout(run, 4000), it = setInterval(run, 60000);
+    const vis = () => { if (!document.hidden) run(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { clearTimeout(t0); clearInterval(it); document.removeEventListener('visibilitychange', vis); };
+  }, []); // eslint-disable-line
 
   // ---------- cartes repliables ----------
   const FOLD_DEFAULT = ['Pads en direct', 'Importer un MP4 ou un audio', 'Exporter', 'Effets de la voix guide', 'Tempo', 'Style'];
@@ -410,7 +434,7 @@ export default function Page() {
           n++;
         });
       });
-      setAiNote(d.note || ''); say(tx('Sonyria a composé {n} ligne(s) à partir de tes paroles', { n }));
+      setAiNote(d.note || ''); say(tx('Sonyria a composé {n} ligne(s) à partir de tes paroles', { n })); snapshot(tx('Mélodie composée par Sonyria'));
       if (!stay) setTab('melodie');
     } catch (e) { say(e.message); }
     setBusy('');
@@ -458,7 +482,7 @@ export default function Page() {
       nb.getChannelData(0).set(buffer.getChannelData(0).subarray(cut)); buffer = nb; st = 0;
     }
     up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Voix {n}', { n: s.tracks.length + 1 }), start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
-    say(tx('Prise enregistrée'));
+    say(tx('Prise enregistrée')); snapshot(tx('Nouvelle prise de voix'));
   };
   const setVideoBg = (file) => {
     if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
@@ -494,10 +518,24 @@ export default function Page() {
         Object.assign(s.tracks[s.tracks.length - 1], { pan: pans[i] ?? 0, vol: kind === 'double' ? 0.45 : 0.38, echo: 0.28, fb: 0.35, reverb: 0.5, back: true });
       }));
       song.tracks.forEach((x) => { if (!x.buffer && x.data) x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
-      say(tx('Back vocal ajouté — ajuste son volume et son écho'));
+      say(tx('Back vocal ajouté — ajuste son volume et son écho')); snapshot(tx('Back vocals ajoutés'));
     } catch (err) { say(tx('Back vocal impossible')); }
     setBusy('');
   };
+  const lastSnap = useRef(0);
+  const snapshot = async (name, kind = 'auto') => {
+    if (!song.lyrics?.trim()) return;
+    try { await DB.saveVersion(song.id, structuredClone(serialize(song)), name, kind); lastSnap.current = Date.now(); if (kind === 'auto') DB.pruneVersions(song.id); } catch (e) {}
+  };
+  // l'original est gardé dès que les paroles sont là; ensuite une progression toutes les 3 minutes de travail
+  useEffect(() => {
+    if (!song.lyrics?.trim()) return;
+    const h = setTimeout(async () => {
+      if (!song.hasOriginal) { song.hasOriginal = true; await snapshot(tx('Original'), 'original'); return; }
+      if (Date.now() - lastSnap.current > 180000) snapshot(tx('Progression automatique'));
+    }, 4000);
+    return () => clearTimeout(h);
+  }, [v]); // eslint-disable-line
   const mkTrack = (s, name, data, sr, start, mute, fx = 'naturel') => s.tracks.push({ id: 't' + Date.now() + Math.random().toString(36).slice(2, 6), name, start, buffer: null, data, sr, vol: 0.9, pan: 0, fx, ...fxParams(fx), mute, solo: false });
   // Importe un MP4/audio et recrée la chanson : paroles, tempo, tonalité, accords, mélodie, karaoké
   const recreate = async (file) => {
@@ -929,6 +967,7 @@ export default function Page() {
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
             <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = freshFrom(song, true); n.id = song.id; load(n); say(tx('Page blanche — on garde ton style')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
+            <button className="btn sm" onClick={() => setSheet({ type: 'versions', id: song.id })}><Ico n="folder" s={18} /> {tx('Versions')}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
@@ -1326,7 +1365,8 @@ export default function Page() {
           <div style={{ maxHeight: 320, display: 'flex' }}><AvatarGrid value={me.av} onPick={(a) => setMe({ ...me, av: a })} /></div>
           <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
-        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} />}
+        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} onVersions={(id) => setSheet({ type: 'versions', id })} />}
+        {sheet.type === 'versions' && <VersionsSheet songId={sheet.id} song={song} load={load} say={say} snapshot={snapshot} back={() => setSheet({ type: 'songs' })} close={() => setSheet(null)} />}
         {sheet.type === 'cover' && <CoverEditor album={sheet.album} song={song} me={me} onSave={(url) => { saveCover(sheet.album, url); setCoverV((x) => x + 1); say(tx('Pochette enregistrée')); setSheet({ type: 'songs' }); }} onCancel={() => setSheet({ type: 'songs' })} />}
         {sheet.type === 'settings' && <>
           <h3><Ico n="settings" s={28} /> {tx("Réglages")}</h3>
@@ -1338,6 +1378,7 @@ export default function Page() {
           <div className="chips"><button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button><button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>{tx("Do Ré Mi")}</button></div>
           <label className="f">{tx("Profil")}</label>
           <div className="row"><button className="btn sm" onClick={() => setSheet({ type: 'profile' })}><Ic n="user" /> {tx("Prénom, nom d’artiste, avatar")}</button><button className="btn sm" onClick={() => { setMe({ ...me, onboarded: false }); setSheet(null); }}><Ic n="undo" /> {tx("Revoir l’accueil")}</button></div>
+          <SyncPanel me={me} say={say} song={song} onPulled={async (ids) => { if (ids.includes(song.id)) { const r = await DB.getSong(song.id); if (r?.song) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } } }} />
           <label className="f">{tx('Crédits des sons')}</label>
           <div className="hint">{tx('Vrais instruments enregistrés, sous licences libres :')} Splendid Grand Piano (domaine public), Rhodes J. Learman, VCSL, D. Smolken (CC0), FluidR3_GM – Frank Wen (MIT) / B. Gleitzman (CC BY 3.0), Pearl Master Studio – enoe (CC BY 3.0), LinnDrum (domaine public), TR-808 – Michael Fischer. <a href="/samples/CREDITS.txt" target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>{tx('Détails')}</a></div>
           <label className="f">{tx("Installer l’app")}</label>
@@ -1559,6 +1600,122 @@ function CoverEditor({ album, song, me, onSave, onCancel }) {
       {loadCover(album) && <button className="btn sm" style={{ color: 'var(--pink)' }} onClick={() => onSave('')}><Ico n="trash" s={18} /> {tx('Retirer')}</button>}
     </div>
     <div className="hint" style={{ marginTop: 6 }}>{tx('Ta pochette apparaît quand ta musique joue, en pastille qui tourne dans tes clips (style TikTok) et dans l’album en MP4.')}</div>
+  </>;
+}
+
+function VersionsSheet({ songId, song, load, say, snapshot, back, close }) {
+  const [list, setList] = useState(null);
+  const [arm, setArm] = useState(null);
+  const [title, setTitle] = useState('');
+  const refresh = () => DB.listVersions(songId).then(setList).catch(() => setList([]));
+  useEffect(() => { refresh(); DB.getSong(songId).then((r) => setTitle(r?.title || (songId === song.id ? song.title : ''))); }, [songId]); // eslint-disable-line
+  const isCur = songId === song.id;
+  const restore = async (v) => {
+    if (!confirm(tx('Revenir à la version « {n} » ? Ta version actuelle est gardée dans la liste.', { n: v.name }))) return;
+    if (isCur) await snapshot(tx('Avant de revenir en arrière'), 'named');
+    else { const r = await DB.getSong(songId); if (r?.song) await DB.saveVersion(songId, r.song, tx('Avant de revenir en arrière'), 'named'); }
+    const rec = await DB.getVersion(v.id); if (!rec?.song) return;
+    const d = newSong(''); load({ ...d, ...structuredClone(rec.song), id: songId, hasOriginal: true, mix: { ...d.mix, ...rec.song.mix }, clip: { ...d.clip, ...rec.song.clip } });
+    say(tx('Version « {n} » rétablie', { n: v.name })); close();
+  };
+  const remove = async (v) => {
+    if (arm !== v.id) { setArm(v.id); say(tx('Touche encore pour supprimer cette version')); return; }
+    const warn = v.kind === 'original' ? tx('Supprimer l’ORIGINAL de ta chanson ? Tu ne pourras plus y revenir.') : tx('Supprimer la version « {n} » ? C’est définitif.', { n: v.name });
+    if (!confirm(warn)) { setArm(null); return; }
+    await DB.deleteVersion(v.id); setArm(null); refresh(); say(tx('Version supprimée'));
+  };
+  const when = (t) => new Date(t).toLocaleString(getLang() === 'en' ? 'en-CA' : 'fr-CA', { dateStyle: 'medium', timeStyle: 'short' });
+  return <>
+    <h3><Ico n="folder" s={26} /> {tx('Versions')} · {title || tx('Sans titre')}</h3>
+    <div className="hint">{tx('Ton original est toujours gardé. Sonyria garde aussi ta progression (toutes les 3 minutes de travail et à chaque étape importante) pour que tu puisses revenir en arrière.')}</div>
+    {isCur && <button className="btn pri" style={{ margin: '10px 0' }} onClick={async () => { const n = (prompt(tx('Nom de cette version'), tx('Ma version')) || '').trim(); if (!n) return; await snapshot(n, 'named'); refresh(); say(tx('Version enregistrée')); }}><Ic n="plus" /> {tx('Enregistrer une version maintenant')}</button>}
+    {list == null ? <span className="busy" /> : !list.length ? <div className="hint">{tx('Aucune version pour l’instant : elles apparaissent dès que tu travailles ta chanson.')}</div> :
+      <div className="vers">{list.map((v) => <div key={v.id} className={'ver ' + v.kind}>
+        <div className="grow"><b>{v.kind === 'original' ? '★ ' : ''}{v.name}</b><small>{when(v.updated)}{v.style ? ' · ' + tx(M.STYLES[v.style]?.n || v.style) : ''} · {tx('{n} lignes', { n: v.lines })}</small></div>
+        <button className="btn sm" onClick={() => restore(v)}><Ic n="undo" /> {tx('Revenir')}</button>
+        <button className={'tgl' + (arm === v.id ? ' on' : '')} onClick={() => remove(v)} aria-label={tx('Supprimer')}><Ico n="trash" s={20} /></button>
+      </div>)}</div>}
+    <div className="row" style={{ marginTop: 12 }}><button className="btn" onClick={back}><Ico n="disc-note" s={18} /> {tx('Mon album')}</button><button className="btn" onClick={close}>{tx('Fermer')}</button></div>
+  </>;
+}
+
+function SyncPanel({ me, say, onPulled }) {
+  const [ready, setReady] = useState(null);
+  const [spaces, setSpaces] = useState(() => loadSpaces());
+  const [busy, setBusy] = useState('');
+  const [join, setJoin] = useState(null); // 'me' | 'team'
+  const [code, setCode] = useState('');
+  useEffect(() => { syncReady().then(setReady); }, []);
+  const persist = (a) => { saveSpaces(a); setSpaces(a); };
+  const run = async (sp) => {
+    setBusy(sp.code);
+    try { const r = await syncSpace(sp, { me }); say(tx('Synchro terminée : {a} reçue(s), {b} envoyée(s)', { a: r.pulled.length, b: r.pushed })); if (r.pulled.length) onPulled(r.pulled); setSpaces(loadSpaces()); }
+    catch (e) { say(tx('Synchro impossible : {e}', { e: e.message })); }
+    setBusy('');
+  };
+  const mine = spaces.find((x) => x.kind === 'me');
+  const teams = spaces.filter((x) => x.kind === 'team');
+  const copy = (c) => { navigator.clipboard?.writeText(prettyCode(c)).then(() => say(tx('Code copié'))).catch(() => {}); };
+  const shareCode = (sp) => { const t = sp.kind === 'team' ? tx('Rejoins mon équipe « {n} » dans Sonyria : Réglages → Synchro → Rejoindre une équipe. Code : {c}', { n: sp.name, c: prettyCode(sp.code) }) : prettyCode(sp.code); if (navigator.share) navigator.share({ text: t }).catch(() => {}); else copy(sp.code); };
+  const doJoin = async () => {
+    const c = normCode(code); if (c.length < 10) return say(tx('Code incomplet'));
+    setBusy('join');
+    try {
+      const p = await peekSpace(c);
+      if (join === 'team') {
+        if (!p.meta) { say(tx('Aucune équipe trouvée avec ce code')); setBusy(''); return; }
+        const sp = { kind: 'team', code: c, name: p.meta.name || tx('Équipe'), album: p.meta.album ?? '' };
+        persist([...spaces.filter((x) => x.code !== c), sp]); setJoin(null); setCode(''); await run(sp);
+      } else {
+        const sp = { kind: 'me', code: c, name: tx('Mes appareils') };
+        persist([...spaces.filter((x) => x.kind !== 'me'), sp]); setJoin(null); setCode(''); await run(sp);
+      }
+    } catch (e) { say(tx('Synchro impossible : {e}', { e: e.message })); }
+    setBusy('');
+  };
+  const leave = (sp) => { if (!confirm(tx('Arrêter la synchro « {n} » sur cet appareil ? Tes chansons restent ici.', { n: sp.name }))) return; persist(spaces.filter((x) => x.code !== sp.code)); };
+  const Row = ({ sp }) => <div className="sync-row">
+    <div className="grow"><b>{sp.name}</b>{sp.kind === 'team' && <small> · {tx('album')} « {sp.album || tx('Mon album')} »</small>}
+      <div className="sync-code" onClick={() => copy(sp.code)}>{prettyCode(sp.code)}</div>
+      <small>{sp.last ? tx('Dernière synchro : {t}', { t: new Date(sp.last).toLocaleTimeString(getLang() === 'en' ? 'en-CA' : 'fr-CA', { hour: '2-digit', minute: '2-digit' }) }) : tx('Pas encore synchronisé')}</small></div>
+    <div className="col">
+      <button className="btn sm pri" disabled={!!busy} onClick={() => run(sp)}>{busy === sp.code ? <span className="busy" /> : <Ic n="loop" />} {tx('Synchroniser')}</button>
+      <button className="btn sm" onClick={() => shareCode(sp)}><Ico n="share" s={16} /> {tx('Partager le code')}</button>
+      <button className="btn sm" onClick={() => leave(sp)}>{tx('Arrêter')}</button>
+    </div>
+  </div>;
+  return <>
+    <label className="f">{tx('Synchro entre mes appareils et mon équipe')}</label>
+    {ready === false ? <div className="hint">{tx('La synchro n’est pas encore activée sur le serveur de Sonyria.')}</div> : <>
+      <div className="hint" style={{ marginBottom: 8 }}>{tx('Un code relie tes appareils (toutes tes chansons) ou ton équipe (un album partagé). Ça se synchronise tout seul chaque minute quand l’app est ouverte.')}</div>
+      <div className="sync-box">
+        <b><Ic n="phone" /> {tx('Mes appareils')}</b>
+        {mine ? <Row sp={mine} /> : <div className="row" style={{ marginTop: 6 }}>
+          <button className="btn sm pri" onClick={async () => { const sp = { kind: 'me', code: normCode(newCode()), name: tx('Mes appareils') }; persist([...spaces, sp]); await run(sp); }}>{tx('Créer mon code')}</button>
+          <button className="btn sm" onClick={() => setJoin('me')}>{tx('J’ai déjà un code')}</button>
+        </div>}
+      </div>
+      <div className="sync-box">
+        <b><Ic n="users" /> {tx('Mes équipes')}</b>
+        {teams.map((sp) => <Row key={sp.code} sp={sp} />)}
+        <div className="row" style={{ marginTop: 6 }}>
+          <button className="btn sm pri" onClick={async () => {
+            const n = (prompt(tx('Nom de l’équipe')) || '').trim(); if (!n) return;
+            const a = (prompt(tx('Quel album partager avec l’équipe ? (un nouvel album sera créé s’il n’existe pas)'), n) || '').trim(); if (!a) return;
+            try { const al = JSON.parse(localStorage.getItem('sonyria-albums') || '[]'); if (!al.includes(a)) localStorage.setItem('sonyria-albums', JSON.stringify([...al, a])); } catch (e) {}
+            const sp = { kind: 'team', code: normCode(newCode()), name: n, album: a === tx('Mon album') ? '' : a }; persist([...spaces, sp]); await run(sp);
+            say(tx('Équipe créée — partage le code à tes coéquipiers'));
+          }}>{tx('Créer une équipe')}</button>
+          <button className="btn sm" onClick={() => setJoin('team')}>{tx('Rejoindre une équipe')}</button>
+        </div>
+      </div>
+      {join && <div className="sync-box" style={{ borderColor: 'var(--cyan)' }}>
+        <b>{join === 'team' ? tx('Code de l’équipe') : tx('Code de mes appareils')}</b>
+        <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="XXXX-XXXX-XXXX" style={{ fontFamily: 'JetBrains Mono, monospace', letterSpacing: 2, textTransform: 'uppercase', marginTop: 6 }} />
+        <div className="row" style={{ marginTop: 6 }}><button className="btn sm pri" disabled={busy === 'join'} onClick={doJoin}>{busy === 'join' ? <span className="busy" /> : <Ic n="check" />} {tx('Relier')}</button><button className="btn sm" onClick={() => { setJoin(null); setCode(''); }}>{tx('Annuler')}</button></div>
+      </div>}
+      <div className="hint" style={{ marginTop: 6 }}>{tx('Garde tes codes privés : toute personne qui a le code peut voir et modifier les chansons de cet espace.')}</div>
+    </>}
   </>;
 }
 
@@ -1854,7 +2011,7 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
   );
 }
 
-function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV }) {
+function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV, onVersions }) {
   const [list, setList] = useState(null);
   const [arm, setArm] = useState(null);
   const [withRec, setWithRec] = useState(true);
@@ -1966,9 +2123,11 @@ function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV })
               <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}
               <div className="hint">{x.style ? tx(M.STYLES[x.style]?.n || x.style) + ' · ' : ''}{tx('{n} lignes', { n: x.lines || 0 })} · {day(x.updated)}</div>
             </button>
+            <button className="btn sm" onClick={() => onVersions(x.id)}>{tx('Versions')}</button>
             <button className="mini" onClick={() => setMoving(moving === x.id ? null : x.id)} aria-label={tx('Changer d’album')}><Ico n="folder" s={20} /></button>
             <button className={'tgl' + (arm === x.id ? ' on' : '')} onClick={async () => {
               if (arm !== x.id) { setArm(x.id); say(tx('Touche encore la corbeille pour supprimer')); return; }
+              if (!confirm(tx('Supprimer « {t} » avec toutes ses versions et ses clips ? C’est définitif.', { t: x.title || tx('Sans titre') }))) { setArm(null); return; }
               await DB.deleteSong(x.id); setArm(null); refresh();
               if (x.id === song.id) { load(newSong('')); say(tx('Chanson supprimée — page blanche prête')); } else say(tx('Chanson supprimée'));
             }} aria-label={tx("Supprimer")}><Ico n="trash" s={22} /></button>
@@ -2010,6 +2169,7 @@ function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV })
     </div>
     {list?.length > 0 && <button className="btn sm" style={{ color: 'var(--pink)', marginTop: 12 }} onClick={async () => {
       if (arm !== 'all') { setArm('all'); say(tx('Touche encore pour tout supprimer')); return; }
+      if (!confirm(tx('Tout supprimer : toutes les chansons, versions et clips ? C’est définitif.'))) { setArm(null); return; }
       for (const x of list) await DB.deleteSong(x.id);
       for (const m of media) await DB.deleteMedia(m.id);
       setArm(null); refresh(); load(newSong('')); say(tx('Tout a été supprimé'));
