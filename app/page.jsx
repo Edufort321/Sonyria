@@ -65,7 +65,7 @@ function newSong(lyrics = DEMO) {
     drums: M.drumPreset('pop'), drumsOn: true, intro: true, leadSound: 'voix', chordSound: '', harmony: 'off', guide: true, metronome: false,
     variant: 0, fr: false, voicePitch: true,
     mix: { lead: 0.75, harm: 0.45, chords: 0.5, bass: 0.7, drums: 0.8, tracks: 1, master: 0.9, leadReverb: 0.25, leadEcho: 0.12, mute: {}, solo: {} },
-    tracks: [], clip: { format: '9:16', scenario: null, theme: null }, latency: null, echoCancel: false, karaRec: true, countIn: true,
+    tracks: [], clip: { format: '9:16', scenario: null, theme: null }, album: (() => { try { return localStorage.getItem('sonyria-album') || ''; } catch (e) { return ''; } })(), latency: null, echoCancel: false, karaRec: true, countIn: true,
   };
   s.blocks = M.parseLyrics(lyrics); M.composeSong(s, 0); s.layers = defaultLayers(s);
   return s;
@@ -130,6 +130,7 @@ export default function Page() {
   const humInfo = useRef(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
+  const [ambRead, setAmbRead] = useState('');
   const [exporting, setExporting] = useState('');
   const [micOn, setMicOn] = useState(false);
   const [polish, setPolish] = useState(null);
@@ -298,11 +299,18 @@ export default function Page() {
     });
     setAmb(M.suggestAmbiances(song.blocks)); setAmbSel(-1);
   };
+  useEffect(() => {
+    const t = (song.lyrics || '').trim();
+    if (!t || aiStatus?.ai !== true || busy || t === lastAmb.current || t.split('\n').filter(Boolean).length < 2) return;
+    const h = setTimeout(() => aiAmbiances(), 2500);
+    return () => clearTimeout(h);
+  }, [song.lyrics, aiStatus, busy]); // eslint-disable-line
   const onLyrics = (text) => { song.lyrics = text; bump(); clearTimeout(lyricsT.current); lyricsT.current = setTimeout(() => analyze(text), 700); };
-  const chooseAmb = (a, i) => {
+  const chooseAmb = async (a, i) => {
     setAmbSel(i);
     up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; M.composeSong(s, s.variant); });
-    play({ from: 0, to: Math.min(tl.bars.length, (song.intro ? 2 : 0) + 8), loop: false });
+    if (aiStatus?.ai) { await aiCompose(true); }
+    play({ from: 0, to: Math.min(buildTimeline(song).bars.length, (song.intro ? 2 : 0) + 8), loop: false });
     say(tx('Extrait de 8 mesures. Touche ▶ en bas pour écouter toute la chanson.'));
   };
 
@@ -313,10 +321,12 @@ export default function Page() {
     if (!r.ok) throw new Error(j.error || tx('Erreur du serveur IA'));
     return j.data;
   };
+  const lastAmb = useRef('');
   const aiAmbiances = async () => {
-    setBusy('amb');
+    setBusy('amb'); lastAmb.current = song.lyrics.trim();
     try {
       const d = await ai('ambiance', { lyrics: song.lyrics });
+      setAmbRead(d.reading || '');
       const opts = (d.options || []).filter((o) => M.STYLES[o.style]).map((o) => ({ style: o.style, mode: o.mode === 'min' ? 'min' : 'maj', key: M.mod(Math.round(+o.key || 0), 12), bpm: clamp(Math.round(+o.bpm || 100), 60, 180), why: o.why || '', ai: true }));
       if (opts.length) { setAmb(opts); setAmbSel(-1); }
     } catch (e) { say(e.message); }
@@ -363,13 +373,14 @@ export default function Page() {
     } catch (e) { say(e.message); }
     setBusy('');
   };
-  const aiCompose = async () => {
+  const aiCompose = async (stay) => {
     setBusy('compose');
     try {
       const F = flat(song);
       const d = await ai('compose', {
         keyName: M.NOTE_FR[song.key], mode: song.mode, style: M.STYLES[song.style].n, bpm: song.bpm, chooseVibe: aiVibe,
-        lines: F.map(({ b, l }, i) => ({ i, section: b.label, bars: l.bars, syllables: l.syls.map((s) => s.t) })),
+        lyrics: song.lyrics,
+        lines: F.map(({ b, l }, i) => ({ i, section: b.label, dyn: b.dyn || 'normal', text: l.text, bars: l.bars, syllables: l.syls.map((s) => s.t) })),
       });
       let n = 0;
       up((s) => {
@@ -393,8 +404,8 @@ export default function Page() {
           n++;
         });
       });
-      setAiNote(d.note || ''); say(tx('Sonyria a composé {n} ligne(s)', { n }));
-      setTab('melodie');
+      setAiNote(d.note || ''); say(tx('Sonyria a composé {n} ligne(s) à partir de tes paroles', { n }));
+      if (!stay) setTab('melodie');
     } catch (e) { say(e.message); }
     setBusy('');
   };
@@ -630,7 +641,7 @@ export default function Page() {
   };
   const exportWav = async () => {
     setExporting('wav');
-    try { const e = await ensureAudio(); await prepareSamples(e.ctx, song); const buf = await renderOffline(song); saveBlob(wavBlob(buf), slug() + '.wav'); say(tx('WAV exporté')); } catch (e) { say(tx('Export impossible : ') + e.message); }
+    try { const e = await ensureAudio(); await prepareSamples(e.ctx, song); const buf = await renderOffline(song); const wb = wavBlob(buf); saveBlob(wb, slug() + '.wav'); DB.saveMedia(song.id, 'wav', wb, slug() + '.wav').catch(() => {}); say(tx('WAV exporté — rangé dans ton album')); } catch (e) { say(tx('Export impossible : ') + e.message); }
     setExporting('');
   };
   const exportLive = async (video) => {
@@ -649,8 +660,8 @@ export default function Page() {
     mr.onstop = () => {
       const type = mr.mimeType || mime || 'video/webm';
       const ext = type.includes('mp4') ? (video ? 'mp4' : 'm4a') : 'webm';
-      saveBlob(new Blob(chunks, { type }), `${slug()}${video ? '-clip' : ''}.${ext}`);
-      setExporting(''); say(ext === 'webm' ? tx('Exporté en WebM (ton navigateur ne gère pas le MP4)') : tx('Exporté en {f}', { f: ext.toUpperCase() }));
+      const ob = new Blob(chunks, { type }), on = `${slug()}${video ? '-clip' : ''}.${ext}`; saveBlob(ob, on); DB.saveMedia(song.id, video ? 'clip' : 'audio', ob, on).catch(() => {});
+      setExporting(''); say(ext === 'webm' ? tx('Exporté en WebM (ton navigateur ne gère pas le MP4)') : tx('Exporté en {f} — rangé dans ton album', { f: ext.toUpperCase() }));
     };
     setExporting(video ? 'clip' : 'mp4');
     mr.start(500);
@@ -789,7 +800,7 @@ export default function Page() {
             <small className="tsub">{me?.name ? tx('Salut, {n}', { n: me.name }) : tx('Studio de chansons')}{song.artist ? ` · ${song.artist}` : ''}</small>
           </div>
           <div className="tacts">
-            <button className="tib" onClick={() => setSheet({ type: 'songs' })} title={tx('Mes chansons')} aria-label={tx('Mes chansons')}><Ico n="folder" s={26} /></button>
+            <button className="tib" onClick={() => setSheet({ type: 'songs' })} title={tx('Mon album')} aria-label={tx('Mon album')}><Ico n="folder" s={26} /></button>
             <button className="tib help" onClick={() => (guide.on ? saveGuide({ ...guide, on: false }) : goStep(GUIDE.findIndex((x) => x.tab === tab)))} title={tx('Guide des premiers pas')} aria-label={tx('Guide des premiers pas')}>?</button>
             <button className="tib" onClick={() => setSheet({ type: 'settings' })} title={tx('Réglages')} aria-label={tx('Réglages')}><Ico n="settings" s={26} /></button>
             {me?.av && <button className="tav" onClick={() => setSheet({ type: 'profile' })} title={tx('Mon profil')} aria-label={tx('Mon profil')}><img src={avSrc(me.av)} alt="" /></button>}
@@ -902,7 +913,9 @@ export default function Page() {
               </button>
             ))}
           </div>
-          <div className="hint" style={{ marginTop: 8 }}>{tx("Touche une ambiance : tout est réarrangé et tu entends un extrait.")}</div>
+          {ambRead && <div className="amb-read"><Ic n="sparkles" size={14} /> <span><b>{tx('Sonyria a lu tes paroles :')}</b> {ambRead}</span></div>}
+          {busy === 'compose' && <div className="row" style={{ marginTop: 8 }}><Magic kind="compose" /></div>}
+          <div className="hint" style={{ marginTop: 8 }}>{aiStatus?.ai ? tx("Ces ambiances viennent de tes paroles. Touche-en une : Sonyria compose la mélodie et les accords à partir de tes mots, puis tu entends un extrait.") : tx("Touche une ambiance : tout est réarrangé et tu entends un extrait.")}</div>
         </div>
 
         <div className="card">
@@ -926,7 +939,7 @@ export default function Page() {
         <div className="card">
           <button className="btn pri wide" onClick={() => { setTab('melodie'); play({ from: 0 }); }}><Ic n="play" /> {tx("Écouter l’arrangement")}</button>
           <div style={{ height: 8 }} />
-          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <Magic kind="compose" /> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Sonyria")}</>}</button>
+          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={() => aiCompose()}>{busy === 'compose' ? <Magic kind="compose" /> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Sonyria")}</>}</button>
           <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Sonyria choisir aussi le style, la tonalité et le tempo")}</label>
           {aiStatus?.ai === false && <div className="hint">{tx("IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.")}</div>}
         </div>
@@ -1743,20 +1756,108 @@ function SongsSheet({ song, me, load, close, say }) {
       say(from ? tx('Chanson de {n} ouverte — elle est maintenant dans tes chansons', { n: from }) : tx('Chanson ouverte — elle est maintenant dans tes chansons'));
     } catch (e) { say(tx('Ce fichier n’est pas une chanson Sonyria')); }
   };
-  const refresh = () => DB.listSongs().then(setList).catch(() => setList([]));
+  const DEF = tx('Mon album');
+  const [media, setMedia] = useState([]);
+  const [albums, setAlbums] = useState(() => { try { return JSON.parse(localStorage.getItem('sonyria-albums') || '[]'); } catch (e) { return []; } });
+  const [sel, setSel] = useState(() => { try { return song.album || localStorage.getItem('sonyria-album') || DEF; } catch (e) { return DEF; } });
+  const [moving, setMoving] = useState(null);
+  const [prev, setPrev] = useState(null);
+  const refresh = () => { DB.listSongs().then(setList).catch(() => setList([])); DB.listMedia().then(setMedia).catch(() => setMedia([])); };
   useEffect(() => { refresh(); }, []);
+  const albOf = (x) => x.album || DEF;
+  const allAlbums = [...new Set([DEF, ...albums, ...(list || []).map(albOf), song.album || DEF])];
+  const pick = (a) => { setSel(a); try { localStorage.setItem('sonyria-album', a === DEF ? '' : a); } catch (e) {} };
+  const saveAlbums = (arr) => { setAlbums(arr); try { localStorage.setItem('sonyria-albums', JSON.stringify(arr)); } catch (e) {} };
+  const newAlbum = () => { const n = (prompt(tx('Nom du nouvel album')) || '').trim(); if (!n) return; saveAlbums([...new Set([...albums, n])]); pick(n); };
+  const setAlbum = async (id, a) => {
+    const v = a === DEF ? '' : a;
+    if (id === song.id) song.album = v;
+    const r = await DB.getSong(id); if (r) { r.song.album = v; await DB.saveSong(r); }
+    setMoving(null); refresh(); say(tx('Rangée dans « {a} »', { a }));
+  };
+  const renameAlbum = async () => {
+    const n = (prompt(tx('Nouveau nom de l’album'), sel) || '').trim(); if (!n || n === sel) return;
+    for (const x of list || []) if (albOf(x) === sel) { const r = await DB.getSong(x.id); if (r) { r.song.album = n; await DB.saveSong(r); } }
+    if ((song.album || DEF) === sel) song.album = n;
+    saveAlbums([...new Set([...albums.filter((x) => x !== sel), n])]); pick(n); refresh();
+  };
+  const openSong = async (id) => { const r = await DB.getSong(id); if (r) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } };
+  const mFile = (m) => new File([m.blob], m.name, { type: m.blob.type || (m.kind === 'clip' ? 'video/mp4' : 'audio/mp4') });
+  const dl = (m) => { const a = document.createElement('a'); a.href = URL.createObjectURL(m.blob); a.download = m.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); };
+  const UP = { youtube: 'https://www.youtube.com/upload', tiktok: 'https://www.tiktok.com/upload', instagram: 'https://www.instagram.com/', facebook: 'https://www.facebook.com/' };
+  const shareTo = async (m, where) => {
+    const f = mFile(m), title = (list || []).find((x) => x.id === m.songId)?.title || 'Sonyria';
+    try { if (navigator.canShare && navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title, text: `${title} 🎵 #Sonyria` }); return; } } catch (e) { if (e?.name === 'AbortError') return; }
+    dl(m);
+    if (where && UP[where]) { window.open(UP[where], '_blank', 'noopener'); say(tx('Fichier téléchargé : dépose-le sur la page qui vient de s’ouvrir')); }
+    else say(tx('Fichier téléchargé'));
+  };
+  const inAlb = (list || []).filter((x) => albOf(x) === sel);
+  const fmtSize = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' Mo' : Math.round(b / 1e3) + ' Ko');
+  const day = (t) => new Date(t).toLocaleDateString(getLang() === 'en' ? 'en-CA' : 'fr-CA');
   return <>
-    <h3><Ico n="folder" s={28} /> {tx("Mes chansons")}</h3>
+    <h3><Ico n="disc-note" s={28} /> {tx('Mon album')}</h3>
+    <div className="chips alb-tabs">
+      {allAlbums.map((a) => <button key={a} className={'chip' + (sel === a ? ' on' : '')} onClick={() => pick(a)}>{a} <small>{(list || []).filter((x) => albOf(x) === a).length}</small></button>)}
+      <button className="chip" onClick={newAlbum}><Ic n="plus" size={14} /> {tx('Nouvel album')}</button>
+      {sel !== DEF && <button className="chip" onClick={renameAlbum}><Ic n="pen" size={14} /> {tx('Renommer')}</button>}
+    </div>
+    <div className="hint" style={{ margin: '6px 0 10px' }}>{tx('Tes chansons et tes clips exportés se rangent ici au fur et à mesure. Les nouvelles chansons vont dans l’album choisi.')}</div>
     {ask && <div className="ask-style">
       <b>{tx('On reste dans le même style ?')}</b>
       <div className="hint">{styleLabel(song)}</div>
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn pri" onClick={() => { load(freshFrom(song, true)); close(); say(tx('Nouvelle chanson dans le même style')); }}><Ic n="check" /> {tx('Oui, même style')}</button>
-        <button className="btn" onClick={() => { load(freshFrom(song, false)); close(); }}>{tx('Non, nouveau style')}</button>
+        <button className="btn pri" onClick={() => { const n = freshFrom(song, true); n.album = sel === DEF ? '' : sel; load(n); close(); say(tx('Nouvelle chanson dans le même style')); }}><Ic n="check" /> {tx('Oui, même style')}</button>
+        <button className="btn" onClick={() => { const n = freshFrom(song, false); n.album = sel === DEF ? '' : sel; load(n); close(); }}>{tx('Non, nouveau style')}</button>
         <button className="mini" onClick={() => setAsk(false)}><Ic n="x" /></button>
       </div>
     </div>}
-    <div className="share-box">
+    <div className="row" style={{ marginBottom: 10 }}>
+      <button className="btn pri" onClick={() => { if (song.lyrics?.trim() || song.tracks?.length) setAsk(true); else { const n = freshFrom(song, false); n.album = sel === DEF ? '' : sel; load(n); close(); } }}>{tx("＋ Nouvelle chanson")}</button>
+      <button className="btn" onClick={() => { const c = structuredClone(serialize(song)); c.id = 's' + Date.now(); c.title = song.title + tx(' (copie)'); load(c); close(); say(tx('Copie créée')); }}>{tx("⧉ Dupliquer")}</button>
+    </div>
+    {list == null ? <span className="busy" /> : !inAlb.length ? <div className="hint">{tx('Cet album est vide pour l’instant.')}</div> :
+      inAlb.map((x) => {
+        const ms = media.filter((m) => m.songId === x.id);
+        return <div key={x.id} className={'alb-song' + (x.id === song.id ? ' cur' : '')}>
+          <div className="row nw">
+            <button className="grow" style={{ textAlign: 'left' }} onClick={() => openSong(x.id)}>
+              <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}
+              <div className="hint">{x.style ? tx(M.STYLES[x.style]?.n || x.style) + ' · ' : ''}{tx('{n} lignes', { n: x.lines || 0 })} · {day(x.updated)}</div>
+            </button>
+            <button className="mini" onClick={() => setMoving(moving === x.id ? null : x.id)} aria-label={tx('Changer d’album')}><Ico n="folder" s={20} /></button>
+            <button className={'tgl' + (arm === x.id ? ' on' : '')} onClick={async () => {
+              if (arm !== x.id) { setArm(x.id); say(tx('Touche encore la corbeille pour supprimer')); return; }
+              await DB.deleteSong(x.id); setArm(null); refresh();
+              if (x.id === song.id) { load(newSong('')); say(tx('Chanson supprimée — page blanche prête')); } else say(tx('Chanson supprimée'));
+            }} aria-label={tx("Supprimer")}><Ico n="trash" s={22} /></button>
+          </div>
+          {moving === x.id && <div className="chips" style={{ marginTop: 6 }}>
+            {allAlbums.filter((a) => a !== albOf(x)).map((a) => <button key={a} className="chip" onClick={() => setAlbum(x.id, a)}>→ {a}</button>)}
+            <button className="chip" onClick={async () => { const n = (prompt(tx('Nom du nouvel album')) || '').trim(); if (n) { saveAlbums([...new Set([...albums, n])]); await setAlbum(x.id, n); } }}><Ic n="plus" size={14} /> {tx('Nouvel album')}</button>
+          </div>}
+          {ms.map((m) => <div key={m.id} className="alb-media">
+            <div className="row nw">
+              <button className="mini" onClick={() => setPrev(prev?.id === m.id ? null : { id: m.id, url: URL.createObjectURL(m.blob) })}><Ico n={m.kind === 'clip' ? 'play' : 'disc-note'} s={20} /></button>
+              <div className="grow"><b>{m.kind === 'clip' ? tx('Vidéoclip') : m.kind === 'wav' ? 'WAV' : tx('Audio')}</b><small> · {fmtSize(m.size || m.blob.size)} · {day(m.updated)}</small></div>
+              <button className="mini" onClick={() => dl(m)} aria-label={tx('Télécharger')}><Ic n="download" /></button>
+              <button className={'tgl' + (arm === m.id ? ' on' : '')} onClick={async () => { if (arm !== m.id) { setArm(m.id); say(tx('Touche encore la corbeille pour supprimer')); return; } await DB.deleteMedia(m.id); setArm(null); refresh(); }} aria-label={tx('Supprimer')}><Ico n="trash" s={20} /></button>
+            </div>
+            {prev?.id === m.id && (m.kind === 'clip' ? <video src={prev.url} controls playsInline className="alb-prev" /> : <audio src={prev.url} controls style={{ width: '100%', marginTop: 6 }} />)}
+            <div className="chips" style={{ marginTop: 6 }}>
+              <button className="chip on" onClick={() => shareTo(m)}><Ico n="share" s={16} /> {tx('Partager')}</button>
+              {m.kind === 'clip' && <>
+                <button className="chip" onClick={() => shareTo(m, 'youtube')}>YouTube</button>
+                <button className="chip" onClick={() => shareTo(m, 'tiktok')}>TikTok</button>
+                <button className="chip" onClick={() => shareTo(m, 'instagram')}>Instagram</button>
+                <button className="chip" onClick={() => shareTo(m, 'facebook')}>Facebook</button>
+              </>}
+            </div>
+          </div>)}
+          {!ms.length && x.id === song.id && <div className="hint" style={{ marginTop: 4 }}>{tx('Exporte un clip ou un audio (onglet Clip) : il apparaîtra ici, prêt à partager.')}</div>}
+        </div>;
+      })}
+    <div className="share-box" style={{ marginTop: 14 }}>
       <b><Ico n="share" s={22} /> {tx('Partager avec quelqu’un qui a Sonyria')}</b>
       <div className="row" style={{ marginTop: 8 }}>
         <button className="btn pri" disabled={sharing} onClick={doShare}>{sharing ? <span className="busy" /> : <Ico n="share" s={20} />} {tx('Partager « {t} »', { t: song.title || tx('Sans titre') })}</button>
@@ -1766,27 +1867,11 @@ function SongsSheet({ song, me, load, close, say }) {
       {hasRec && <label className="row" style={{ fontSize: 12.5, marginTop: 6 }}><input type="checkbox" checked={withRec} onChange={(e) => setWithRec(e.target.checked)} /> {tx('Inclure mes enregistrements de voix (fichier plus gros)')}</label>}
       <div className="hint" style={{ marginTop: 6 }}>{tx('Tout est inclus : paroles, mélodie, accords, beat, instruments et structure. L’autre personne ouvre le fichier .sonyria dans son app et peut le modifier.')}</div>
     </div>
-    <div className="row" style={{ marginBottom: 10 }}>
-      <button className="btn pri" onClick={() => { if (song.lyrics?.trim() || song.tracks?.length) setAsk(true); else { load(freshFrom(song, false)); close(); } }}>{tx("＋ Nouvelle chanson")}</button>
-      {list?.length > 0 && <button className="btn" style={{ color: 'var(--pink)' }} onClick={async () => {
-        if (arm !== 'all') { setArm('all'); say(tx('Touche encore pour tout supprimer')); return; }
-        for (const x of list) await DB.deleteSong(x.id);
-        setArm(null); refresh(); load(newSong('')); say(tx('Tout a été supprimé'));
-      }}><Ico n="trash" s={20} /> {arm === 'all' ? tx('Confirmer : tout supprimer') : tx('Tout supprimer')}</button>}
-      <button className="btn" onClick={() => { const c = structuredClone(serialize(song)); c.id = 's' + Date.now(); c.title = song.title + tx(' (copie)'); load(c); close(); say(tx('Copie créée')); }}>{tx("⧉ Dupliquer")}</button>
-    </div>
-    {list == null ? <span className="busy" /> : !list.length ? <div className="hint">{tx("Rien d’enregistré pour l’instant (sauvegarde automatique).")}</div> :
-      list.map((x) => (
-        <div key={x.id} className="row nw" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-          <button className="grow" style={{ textAlign: 'left' }} onClick={async () => { const r = await DB.getSong(x.id); if (r) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } }}>
-            <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}<div className="hint">{new Date(x.updated).toLocaleString(getLang() === 'en' ? 'en-CA' : 'fr-CA')}</div>
-          </button>
-          <button className={'tgl' + (arm === x.id ? ' on' : '')} onClick={async () => {
-            if (arm !== x.id) { setArm(x.id); say(tx('Touche encore la corbeille pour supprimer')); return; }
-            await DB.deleteSong(x.id); setArm(null); refresh();
-            if (x.id === song.id) { load(newSong('')); say(tx('Chanson supprimée — page blanche prête')); } else say(tx('Chanson supprimée'));
-          }} aria-label={tx("Supprimer")}><Ico n="trash" s={24} /></button>
-        </div>
-      ))}
+    {list?.length > 0 && <button className="btn sm" style={{ color: 'var(--pink)', marginTop: 12 }} onClick={async () => {
+      if (arm !== 'all') { setArm('all'); say(tx('Touche encore pour tout supprimer')); return; }
+      for (const x of list) await DB.deleteSong(x.id);
+      for (const m of media) await DB.deleteMedia(m.id);
+      setArm(null); refresh(); load(newSong('')); say(tx('Tout a été supprimé'));
+    }}><Ico n="trash" s={18} /> {arm === 'all' ? tx('Confirmer : tout supprimer') : tx('Tout supprimer (toutes les chansons et clips)')}</button>}
   </>;
 }

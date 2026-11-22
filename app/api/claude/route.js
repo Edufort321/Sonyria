@@ -21,10 +21,12 @@ function prompt(task, p) {
 }
 function base(task, p) {
   if (task === 'ambiance') {
-    return `Tu es directeur musical. Lis ces paroles et propose 4 ambiances musicales différentes et pertinentes.
-Styles permis : ${STYLES.join(', ')}. Tonalité "key" : entier 0-11 (0=Do, 2=Ré, 4=Mi, 5=Fa, 7=Sol, 9=La, 11=Si). "mode" : "maj" ou "min". "bpm" : 60-170.
-Varie les styles et les tempos. Pour chaque ambiance, "why" = une courte phrase en français qui explique le lien avec le texte.
-Réponds UNIQUEMENT avec ce JSON : {"options":[{"style":"pop","mode":"maj","key":0,"bpm":104,"why":"..."}]}
+    return `Tu es directeur musical. Pars VRAIMENT des paroles : lis-les attentivement (sens, émotions, images, rythme des vers, rimes, intensité de chaque section) avant de proposer quoi que ce soit.
+Propose 4 ambiances musicales différentes qui servent ce texte précis.
+Styles permis : ${STYLES.join(', ')}. Tonalité "key" : entier 0-11 (0=Do, 2=Ré, 4=Mi, 5=Fa, 7=Sol, 9=La, 11=Si). "mode" : "maj" ou "min". "bpm" : 60-170 (adapte le tempo au débit des vers : vers longs = tempo plus posé).
+Pour chaque ambiance, "why" = une courte phrase qui explique le lien avec le texte en citant un mot ou une image des paroles.
+"reading" = 1 ou 2 phrases : ce que raconte la chanson et l'émotion de chaque grande section (ex. couplets intimes, refrain qui s'ouvre, pont fragile).
+Réponds UNIQUEMENT avec ce JSON : {"reading":"...","options":[{"style":"pop","mode":"maj","key":0,"bpm":104,"why":"..."}]}
 
 Paroles :
 ${p.lyrics}`;
@@ -68,11 +70,16 @@ Règles :
 - Place les syllabes accentuées (fins de mots, fins de vers) sur les temps forts ; finis chaque vers par une note plus longue.
 - Les accords doivent soutenir la mélodie (notes longues = notes de l'accord).
 - Les refrains identiques ont la même mélodie ; le refrain monte plus haut et est plus accrocheur que les couplets.
+- PARS DU SENS DES PAROLES : l'harmonie suit l'émotion de chaque vers (tristesse, manque, doute → accords 6, 2, 3 et mineurs; espoir, élan, lumière → 4, 5, 1; tension → 5 ou 2 avant une résolution). Les mots forts du vers tombent sur les notes hautes ou longues; une question monte, une affirmation descend vers la tonique.
+- Respecte la nuance de chaque section ("dyn" : soft = notes plus graves et plus longues, emo = intervalles expressifs, loud = registre plus haut).
 ${p.chooseVibe ? `- Choisis aussi la meilleure tonalité ("key" 0-11), le "mode" ("maj"|"min"), le "style" parmi [${STYLES.join(', ')}] et le "bpm" selon l'émotion du texte.` : ''}
 Réponds UNIQUEMENT avec ce JSON :
 {${p.chooseVibe ? '"key":0,"mode":"maj","style":"pop","bpm":100,' : ''}"lines":[{"i":0,"chords":[1,5],"notes":[{"p":2,"d":2,"r":0}]}],"note":"une ou deux phrases en français sur tes choix"}
 
-Lignes (i, section, mesures, syllabes) :
+Paroles complètes (pour le sens) :
+${p.lyrics || ''}
+
+Lignes (i, section, nuance, texte, mesures, syllabes) :
 ${JSON.stringify(p.lines)}`;
   }
   if (task === 'clip') {
