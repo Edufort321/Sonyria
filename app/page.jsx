@@ -272,14 +272,11 @@ export default function Page() {
         setOcr({ lyrics: await docxText(docx), title: docx.name.replace(/\.[^.]+$/, ''), note: '' });
       } else if (pdf) {
         if (pdf.size > 3_000_000) throw new Error(tx('PDF trop lourd (3 Mo max). Envoie plutôt des photos des pages.'));
-        setProgress(tx('Claude lit ton document…'));
         const d = await ai('ocr', { kind: 'pdf', pdf: await toB64(pdf), correct: ocrFix });
         setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
       } else {
-        setProgress(tx('Préparation des photos…'));
         const images = [];
         for (const f of imgs.slice(0, 8)) images.push(await imageToJpeg(f, imgs.length > 3 ? 1500 : 1800));
-        setProgress(tx('Claude lit ton écriture… ({n} page(s))', { n: images.length }));
         const d = await ai('ocr', { kind: 'images', images, correct: ocrFix });
         setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
       }
@@ -681,7 +678,7 @@ export default function Page() {
           </div>
           <div className="dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); importCompositions(e.dataTransfer.files); }}>
             <div className="dz-t"><Ico n="upload" s={30} /><div><b>{tx('Dépose tes compositions')}</b><small>{tx('Photo d’un cahier ou d’une feuille manuscrite, PDF, Word ou texte')}</small></div></div>
-            {busy === 'ocr' ? <div className="row"><span className="busy" /> {progress || tx('Lecture…')}</div> : <div className="row">
+            {busy === 'ocr' ? <div className="row"><Magic kind="ocr" /></div> : <div className="row">
               <label className="btn sm pri"><Ic n="camera" /> {tx('Prendre en photo')}<input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
               <label className="btn sm"><Ic n="file" /> {tx('Importer des fichiers')}<input type="file" accept="image/*,.pdf,.txt,.md,.docx,text/plain,application/pdf" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
             </div>}
@@ -703,7 +700,7 @@ export default function Page() {
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <><span className="busy" /> {tx("Correction…")}</> : <><Ic n="wand" /> {tx("Corriger et adapter avec Claude")}</>}</button>
+            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger et adapter avec Claude")}</>}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
@@ -721,7 +718,7 @@ export default function Page() {
 
         <div className="card">
           <h3><Ico n="headphones-wave" s={28} /> {tx("Ambiances proposées")}<span className="sp" />
-            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Demander à Claude')}</button>
+            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <Magic kind="amb" /> : <><Ic n="sparkles" /> {tx('Demander à Claude')}</>}</button>
           </h3>
           <div className="amb">
             {amb.map((a, i) => (
@@ -756,7 +753,7 @@ export default function Page() {
         <div className="card">
           <button className="btn pri wide" onClick={() => { setTab('melodie'); play({ from: 0 }); }}><Ic n="play" /> {tx("Écouter l’arrangement")}</button>
           <div style={{ height: 8 }} />
-          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <><span className="busy" /> {tx("Claude compose…")}</> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Claude")}</>}</button>
+          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <Magic kind="compose" /> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Claude")}</>}</button>
           <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Claude choisir aussi le style, la tonalité et le tempo")}</label>
           {aiStatus?.ai === false && <div className="hint">{tx("IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.")}</div>}
         </div>
@@ -970,7 +967,7 @@ export default function Page() {
           <div className="chips">{Object.entries(THEMES).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
           <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
-            <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Scénario IA')}</button>
+            <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <Magic kind="clip" /> : <><Ic n="sparkles" /> {tx('Scénario IA')}</>}</button>
             <label className="btn"><Ic n="film" /> {tx("Vidéo de fond")}<input type="file" accept="video/*" hidden onChange={(e) => e.target.files[0] && setVideoBg(e.target.files[0])} /></label>
             {videoBg.current && <button className="btn sm" onClick={() => { videoBg.current = null; bump(); }}><Ic n="x" /> {tx("Vidéo")}</button>}
             <label className="btn"><Ic n="images" /> {tx("Mes photos")}<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /></label>
@@ -1121,6 +1118,20 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+const MAGIC = {
+  ocr: ['Créons quelque chose de merveilleux…', 'Tes mots prennent vie…', 'On déchiffre ta plume avec soin…', 'Chaque ligne trouve sa place…', 'Ta chanson se réveille…'],
+  compose: ['La magie opère…', 'On cherche la mélodie parfaite…', 'Les notes se posent sur tes mots…', 'Créons quelque chose de merveilleux…'],
+  polish: ['On peaufine chaque rime…', 'Tes vers prennent leur envol…', 'Créons quelque chose de merveilleux…'],
+  amb: ['On cherche l’ambiance idéale…', 'Chaque style a sa couleur…'],
+  clip: ['On imagine ton clip…', 'Lumières, couleurs, action…', 'Créons quelque chose de merveilleux…'],
+};
+function Magic({ kind }) {
+  const list = MAGIC[kind] || MAGIC.ocr;
+  const [i, setI] = useState(0);
+  useEffect(() => { const t = setInterval(() => setI((x) => (x + 1) % list.length), 2600); return () => clearInterval(t); }, [list.length]);
+  return <span className="magic"><span className="sparkle"><Ic n="sparkles" size={16} g /></span><span key={i} className="mtxt">{tx(list[i])}</span></span>;
 }
 
 function HumBeat({ eng }) {
