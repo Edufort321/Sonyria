@@ -4,6 +4,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
 import { KITS } from '@/lib/samples';
+import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer } from '@/lib/arrange';
 import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
@@ -52,13 +53,14 @@ function newSong(lyrics = DEMO) {
     mix: { lead: 0.75, harm: 0.45, chords: 0.5, bass: 0.7, drums: 0.8, tracks: 1, master: 0.9, leadReverb: 0.25, leadEcho: 0.12, mute: {}, solo: {} },
     tracks: [], clip: { format: '9:16', scenario: null, theme: null }, latency: null, echoCancel: false, karaRec: true, countIn: true,
   };
-  s.blocks = M.parseLyrics(lyrics); M.composeSong(s, 0);
+  s.blocks = M.parseLyrics(lyrics); M.composeSong(s, 0); s.layers = defaultLayers(s);
   return s;
 }
 function applyStyle(s, style) {
   const st = M.STYLES[style];
-  s.kit = null;
-  s.style = style; s.bpm = st.bpm; s.swing = st.swing; s.drums = M.drumPreset(st.drums); s.chordSound = '';
+  s.kit = null; s.layers = null;
+  s.style = style; s.bpm = st.bpm; s.swing = st.swing; s.drums = M.drumPreset(st.drums); s.chordSound = ''; s.leadSound = st.lead || 'voix';
+  s.layers = defaultLayers(s);
 }
 const flat = (s) => s.blocks.flatMap((b, bi) => b.lines.map((l, li) => ({ b, bi, l, li })));
 const serialize = (s) => ({ ...s, tracks: s.tracks.map(({ buffer, ...t }) => t) });
@@ -161,7 +163,7 @@ export default function Page() {
   };
   const load = (s) => {
     eng.current?.stop(); setPlaying(false);
-    S.current = s; setSel(null); setAmb(M.suggestAmbiances(s.blocks)); setAmbSel(-1); lastBpm.current = s.bpm;
+    ensureLayers(s); S.current = s; setSel(null); setAmb(M.suggestAmbiances(s.blocks)); setAmbSel(-1); lastBpm.current = s.bpm;
     if (eng.current) s.tracks.forEach((t) => { t.buffer = t.data ? storeToBuffer(eng.current.ctx, { sr: t.sr, ch: [t.data] }) : null; });
     bump();
   };
@@ -468,7 +470,7 @@ export default function Page() {
         const name = sing ? tx('Voix chantée') : tx('Fredonnement');
         s.tracks.push({ id: 't' + Date.now(), name, start, buffer: r.buffer, data, sr, vol: 0.9, pan: 0, fx: sing ? 'studio' : 'naturel', ...fxParams(sing ? 'studio' : 'naturel'), mute: !sing, solo: false });
         if (sing) { s.mix.mute = { ...s.mix.mute, lead: true, harm: false, chords: false, bass: false, drums: false }; }
-        else { s.leadSound = hum.instr; s.mix.mute = { ...s.mix.mute, lead: false, chords: false, bass: false, drums: false }; }
+        else { s.leadSound = hum.instr; ensureLayers(s).forEach((l) => { if (l.role === 'melody') l.inst = hum.instr; }); s.mix.mute = { ...s.mix.mute, lead: false, chords: false, bass: false, drums: false }; }
       });
       say(sing ? tx('Ta voix est arrangée : accords, basse et batterie ajoutés') : tx('Mélodie reproduite : {n} notes en {k}', { n: notes.length, k: `${(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[K.key]} ${tx(K.mode === 'maj' ? 'majeur' : 'mineur')}` }));
       setTab('melodie');
@@ -794,17 +796,13 @@ export default function Page() {
             <button className="chip" onClick={() => { const n = 4 + Math.floor(Math.random() * 1000); up((s) => { s.variant = n; M.composeSong(s, n); }); play({ from: 0 }); }}><Ic n="dice" /> {tx("Autre")}</button>
           </div>
           {aiNote && <div className="hint" style={{ marginTop: 8 }}><Ic n="sparkles" size={13} /> {aiNote}</div>}
-          <div className="row" style={{ marginTop: 10 }}>
-            <div className="grow"><label className="f">{tx("Voix guide")}</label><select value={song.leadSound} onChange={(e) => up((s) => (s.leadSound = e.target.value))}>{Object.entries(LEADS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
-            <div className="grow"><label className="f">{tx("Accords")}</label><select value={song.chordSound || ''} onChange={(e) => up((s) => (s.chordSound = e.target.value))}>{Object.entries(CHORDS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
-            <div className="grow"><label className="f">{tx("Harmonie vocale")}</label><select value={song.harmony} onChange={(e) => up((s) => (s.harmony = e.target.value))}>{Object.entries(HARMS).map(([k, n]) => <option key={k} value={k}>{tx(n)}</option>)}</select></div>
-          </div>
           <div className="chips" style={{ marginTop: 8 }}>
             <button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button>
             <button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>{tx("Do Ré Mi")}</button>
           </div>
         </div>
 
+        <Arrangement song={song} up={up} preload={async () => { const e = await ensureAudio(); prepareSamples(e.ctx, song); }} />
         {song.blocks.map((b, bi) => (
           <div key={bi}>
             <div className="sec-h">
@@ -858,7 +856,7 @@ export default function Page() {
           <input type="range" min="50" max="200" value={song.bpm} onChange={(e) => up((s) => (s.bpm = +e.target.value))} />
           <div className="sl"><span>{tx("Swing / groove")}</span><input type="range" min="0" max="0.7" step="0.05" value={song.swing} onChange={(e) => up((s) => (s.swing = +e.target.value))} /><output>{Math.round(song.swing * 100)}%</output></div>
           <div className="chips" style={{ marginTop: 6 }}>
-            {Object.entries(KITS).map(([k, n]) => <button key={k} className={'chip' + (kitFor(song) === k ? ' on' : '')} onClick={async () => { up((s) => (s.kit = k)); const e = await ensureAudio(); e.kit = k; e.drum('kick', e.ctx.currentTime + 0.05); e.drum('snare', e.ctx.currentTime + 0.35); }}><Ico n={k === 'acoustic' ? 'drumkit' : k === 'synth' ? 'synth' : 'pads'} s={18} /> {tx(n)}</button>)}
+            {Object.entries(KITS).map(([k, n]) => <button key={k} className={'chip' + (kitFor(song) === k ? ' on' : '')} onClick={async () => { up((s) => { s.kit = k; ensureLayers(s).forEach((l) => { if (l.role === 'drums') l.inst = k; }); }); const e = await ensureAudio(); e.kit = k; e.drum('kick', e.ctx.currentTime + 0.05); e.drum('snare', e.ctx.currentTime + 0.35); }}><Ico n={k === 'acoustic' ? 'drumkit' : k === 'synth' ? 'synth' : 'pads'} s={18} /> {tx(n)}</button>)}
           </div>
           <div className="chips" style={{ marginTop: 6 }}>
             <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}><Ic n="drum" size={14} /> {tx("Batterie")}</button>
@@ -1150,6 +1148,47 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+function Arrangement({ song, up, preload }) {
+  const [adding, setAdding] = useState(null); // null | 'role' | nom du rôle
+  const layers = ensureLayers(song);
+  const edit = (id, fn) => up((s) => { const l = ensureLayers(s).find((x) => x.id === id); if (l) fn(l); });
+  return (
+    <div className="card arr">
+      <h3><Ico n="mixer" s={28} /> {tx('Arrangement')}<span className="sp" />
+        <button className="btn sm" onClick={() => { up((s) => { s.layers = defaultLayers(s); }); preload(); }} title={tx('Remettre l’arrangement du style')}><Ic n="undo" /></button>
+      </h3>
+      <div className="hint" style={{ marginBottom: 8 }}>{tx('Instruments de la proposition. Ajoute, enlève ou dose chaque instrument, même pendant que ça joue.')}</div>
+      {layers.map((l) => (
+        <div key={l.id} className={'arr-row' + (l.on === false ? ' off' : '')}>
+          <button className="arr-ico" onClick={() => edit(l.id, (x) => (x.on = x.on === false))} title={l.on === false ? tx('Activer') : tx('Couper')}><Ico n={instIcon(l.role, l.inst)} s={34} dim={l.on === false} /></button>
+          <div className="arr-main">
+            <select value={l.inst} onChange={(e) => { edit(l.id, (x) => (x.inst = e.target.value)); preload(); }}>
+              {ROLES[l.role].insts.map((i) => <option key={i} value={i}>{tx(instName(l.role, i))}</option>)}
+            </select>
+            <div className="arr-vol">
+              <small>{tx(ROLES[l.role].n)}</small>
+              <input type="range" min="0" max="1.5" step="0.05" value={l.vol ?? 1} onChange={(e) => edit(l.id, (x) => (x.vol = +e.target.value))} />
+              <output>{Math.round((l.vol ?? 1) * 100)} %</output>
+            </div>
+          </div>
+          <button className={'arr-tgl' + (l.on === false ? '' : ' on')} onClick={() => edit(l.id, (x) => (x.on = x.on === false))} aria-label={tx('Couper')}>{l.on === false ? tx('OFF') : tx('ON')}</button>
+          <button className="mini" onClick={() => up((s) => (s.layers = ensureLayers(s).filter((x) => x.id !== l.id)))} aria-label={tx('Supprimer')}><Ico n="trash" s={20} /></button>
+        </div>
+      ))}
+      {!adding ? <button className="btn wide" style={{ marginTop: 8 }} onClick={() => setAdding('role')}><Ic n="plus" /> {tx('Ajouter un instrument')}</button> : (
+        <div className="arr-add">
+          <div className="row"><b>{adding === 'role' ? tx('Quel rôle ?') : tx('Quel instrument ?')}</b><span className="grow" /><button className="mini" onClick={() => setAdding(null)}><Ic n="x" /></button></div>
+          <div className="chips" style={{ marginTop: 8 }}>
+            {adding === 'role'
+              ? Object.entries(ROLES).map(([r, d]) => <button key={r} className="chip" onClick={() => setAdding(r)}><Ico n={d.icon} s={20} /> {tx(d.n)}</button>)
+              : ROLES[adding].insts.map((i) => <button key={i} className="chip" onClick={() => { const r = adding; up((s) => ensureLayers(s).push(newLayer(r, i, 0.8))); setAdding(null); preload(); }}><Ico n={instIcon(adding, i)} s={20} /> {tx(instName(adding, i))}</button>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PrintView({ song, me, onClose }) {
