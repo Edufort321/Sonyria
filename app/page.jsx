@@ -175,10 +175,12 @@ export default function Page() {
   const save = () => {
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      try { await DB.saveSong({ id: song.id, title: song.title, updated: Date.now(), song: serialize(song) }); localStorage.setItem('sonyria-current', song.id); } catch (e) {}
+      const c = S.current;
+      try { await DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); localStorage.setItem('sonyria-current', c.id); } catch (e) {}
     }, 1000);
   };
   const up = (fn) => {
+    const song = S.current; // toujours la chanson ouverte, même depuis un ancien rendu
     fn(song);
     const e = eng.current;
     if (e) {
@@ -332,7 +334,7 @@ export default function Page() {
       M.composeSong(s, s.variant);
       s.blocks.forEach((b) => b.lines.forEach((l) => { const o = old[l.text]; if (o && o.syls.length === l.syls.length && o.custom) { l.bars = o.bars; l.chords = [...o.chords]; l.notes = o.notes.map((n) => ({ ...n })); l.custom = true; } }));
     });
-    setAmb(M.suggestAmbiances(song.blocks)); setAmbSel(-1);
+    setAmb(M.suggestAmbiances(S.current.blocks)); setAmbSel(-1);
   };
   useEffect(() => {
     const t = (song.lyrics || '').trim();
@@ -404,12 +406,31 @@ export default function Page() {
   };
   // garde la mélodie et les accords déjà faits quand on ajoute ou retire des parties
   const freeze = (s) => s.blocks.forEach((b) => b.lines.forEach((l) => { if (l.notes) l.custom = true; }));
-  const useOcr = async (append) => {
-    const merge = append && song.lyrics.trim() && !isDemo(song.lyrics);
-    if (merge) { await snapshot(tx('Avant d’ajouter des pages'), 'named'); freeze(song); }
-    const text = merge ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
-    if (ocr.title && !merge) up((s) => (s.title = ocr.title));
-    analyze(text); setOcr(null); say(merge ? tx('Pages ajoutées à ta chanson — ton arrangement est gardé') : tx('Paroles importées'));
+  const normL = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const ocrStats = (txt) => {
+    const have = new Set(song.lyrics.split('\n').map(normL).filter(Boolean));
+    const ls = txt.split('\n').map(normL).filter((x) => x && x.split(' ').length > 1 && !/^(couplet|refrain|pont|intro|outro|fin|verse|chorus|bridge|pre refrain)\b/.test(x));
+    const old = ls.filter((x) => have.has(x)).length;
+    return { old, fresh: ls.length - old, ratio: ls.length ? old / ls.length : 0 };
+  };
+  // mode : 'update' (tout remettre, garde l'arrangement), 'append' (seulement les nouvelles parties), 'replace', 'new' (nouvelle chanson)
+  const useOcr = async (mode) => {
+    const has = song.lyrics.trim() && !isDemo(song.lyrics), inc = ocr.lyrics.trim();
+    if (mode === 'new') {
+      const n = freshFrom(song, true); n.album = song.album || ''; if (ocr.title) n.title = ocr.title;
+      load(n); setOcr(null); setTimeout(() => analyze(inc), 50); say(tx('Nouvelle chanson créée — l’autre reste dans ton album')); return;
+    }
+    if (has) { await snapshot(mode === 'replace' ? tx('Avant de remplacer les paroles') : tx('Avant d’ajouter des pages'), 'named'); freeze(song); }
+    let text = inc;
+    if (has && mode === 'append') {
+      const have = new Set(song.lyrics.split('\n').map(normL).filter(Boolean));
+      const blocks = inc.split(/\n\s*\n/).filter((b) => b.split('\n').some((l) => { const n = normL(l); return n && n.split(' ').length > 1 && !have.has(n); }));
+      if (!blocks.length) { setOcr(null); say(tx('Rien de nouveau : ces pages sont déjà dans ta chanson')); return; }
+      text = song.lyrics.trim() + '\n\n' + blocks.join('\n\n');
+    }
+    if (ocr.title && !has) up((s) => (s.title = ocr.title));
+    analyze(text); setOcr(null);
+    say(mode === 'update' ? tx('Chanson mise à jour — l’arrangement des lignes déjà faites est gardé') : mode === 'append' ? tx('Pages ajoutées à ta chanson — ton arrangement est gardé') : tx('Paroles importées'));
   };
   const blocksToText = (blocks) => blocks.map((b) => [b.label || TYPES[b.type] || 'Couplet', ...b.lines.map((l) => l.text)].join('\n')).join('\n\n');
   const removeBlock = async (bi) => {
@@ -1030,6 +1051,11 @@ export default function Page() {
       {/* ================= PAROLES ================= */}
       {tab === 'paroles' && <>
         <div className="card" id="g-lyrics">
+          <div className="song-bar">
+            <span className="grow"><small>{tx('Chanson en cours')}</small><b>{song.title || tx('Sans titre')}</b></span>
+            <button className="btn sm pri" onClick={() => setSheet({ type: 'songs', ask: !!song.lyrics?.trim() })}><Ic n="plus" /> {tx('Nouvelle chanson')}</button>
+            <button className="btn sm" onClick={() => setSheet({ type: 'songs' })}><Ico n="folder" s={18} /> {tx('Mon album')}</button>
+          </div>
           <div className="row nw">
             <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder={tx("Titre de la chanson")} />
             <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder={tx("Artiste")} style={{ maxWidth: 160 }} />
@@ -1056,14 +1082,19 @@ export default function Page() {
               <label className="btn sm"><Ic n="file" /> {tx('Ajouter des fichiers')}<input type="file" accept="image/*,.pdf,.txt,.md,.docx" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
             </div>
             {busy === 'ocr' && <div className="row"><Magic kind="ocr" /> <span className="hint">{progress}</span></div>}
-            <div className="row" style={{ marginTop: 8 }}>
-              {song.lyrics.trim() && !isDemo(song.lyrics) ? <>
-                <button className="btn pri" onClick={() => useOcr(true)}><Ic n="plus" /> {tx('Ajouter à ma chanson (fusion)')}</button>
-                <button className="btn" onClick={() => { if (confirm(tx('Remplacer toutes tes paroles par ce texte ?'))) useOcr(false); }}>{tx('Remplacer mes paroles')}</button>
-              </> : <button className="btn pri" onClick={() => useOcr(false)}><Ic n="check" /> {tx('Utiliser ces paroles')}</button>}
-              <button className="btn" onClick={() => setOcr(null)}>{tx('Annuler')}</button>
-            </div>
-            {song.lyrics.trim() && <div className="hint">{tx('La fusion ajoute ces pages à la fin et garde ta mélodie, tes accords et ton arrangement. Tu peux ensuite réordonner dans Mélodie → Structure.')}</div>}
+            {(() => {
+              const has = song.lyrics.trim() && !isDemo(song.lyrics);
+              if (!has) return <div className="row" style={{ marginTop: 8 }}><button className="btn pri" onClick={() => useOcr('replace')}><Ic n="check" /> {tx('Utiliser ces paroles')}</button><button className="btn" onClick={() => setOcr(null)}>{tx('Annuler')}</button></div>;
+              const st = ocrStats(ocr.lyrics);
+              return <div className="ocr-choice">
+                <div className="hint" style={{ marginBottom: 6 }}>{tx('{a} ligne(s) déjà dans ta chanson · {b} nouvelle(s)', { a: st.old, b: st.fresh })}</div>
+                {st.ratio >= 0.3 && <button className="btn pri wide" onClick={() => useOcr('update')}><Ic n="loop" /> {tx('Mettre à jour ma chanson (j’ai tout remis)')}<small>{tx('Remplace le texte par celui-ci, garde la mélodie et les accords des lignes déjà faites')}</small></button>}
+                <button className={'btn wide' + (st.ratio < 0.3 ? ' pri' : '')} onClick={() => useOcr('append')}><Ic n="plus" /> {tx('Ajouter seulement les nouvelles parties')}<small>{tx('Les parties déjà présentes ne sont pas doublées')}</small></button>
+                <button className="btn wide" onClick={() => useOcr('new')}><Ic n="add" /> {tx('Nouvelle chanson avec ce texte')}<small>{tx('Ta chanson actuelle reste intacte dans ton album')}</small></button>
+                <div className="row" style={{ marginTop: 4 }}><button className="btn sm" onClick={() => { if (confirm(tx('Remplacer toutes tes paroles par ce texte ?'))) useOcr('replace'); }}>{tx('Remplacer mes paroles')}</button><button className="btn sm" onClick={() => setOcr(null)}>{tx('Annuler')}</button></div>
+              </div>;
+            })()}
+            {song.lyrics.trim() && <div className="hint">{tx('Une version « Avant… » est toujours gardée. Tu peux réordonner les sections dans Mélodie → Structure.')}</div>}
           </div>}
           <label className="f">{tx("Tes paroles")}</label>
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
@@ -1566,7 +1597,7 @@ export default function Page() {
           <div style={{ maxHeight: 320, display: 'flex' }}><AvatarGrid value={me.av} onPick={(a) => setMe({ ...me, av: a })} /></div>
           <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
-        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} onVersions={(id) => setSheet({ type: 'versions', id })} />}
+        {sheet.type === 'songs' && <SongsSheet key={sheet.ask ? 'ask' : 'list'} startAsk={!!sheet.ask} song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} onVersions={(id) => setSheet({ type: 'versions', id })} />}
         {sheet.type === 'versions' && <VersionsSheet songId={sheet.id} song={song} load={load} say={say} snapshot={snapshot} back={() => setSheet({ type: 'songs' })} close={() => setSheet(null)} />}
         {sheet.type === 'cover' && <CoverEditor album={sheet.album} song={song} me={me} onSave={(url) => { saveCover(sheet.album, url); setCoverV((x) => x + 1); say(tx('Pochette enregistrée')); setSheet({ type: 'songs' }); }} onCancel={() => setSheet({ type: 'songs' })} />}
         {sheet.type === 'settings' && <>
@@ -2291,11 +2322,11 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
   );
 }
 
-function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV, onVersions }) {
+function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV, onVersions, startAsk }) {
   const [list, setList] = useState(null);
   const [arm, setArm] = useState(null);
   const [withRec, setWithRec] = useState(true);
-  const [ask, setAsk] = useState(false);
+  const [ask, setAsk] = useState(!!startAsk);
   const [sharing, setSharing] = useState(false);
   const fileIn = useRef(null);
   const hasRec = song.tracks?.some((t) => t.data);
