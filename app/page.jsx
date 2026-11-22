@@ -5,13 +5,14 @@ import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
 import { KITS } from '@/lib/samples';
 import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer } from '@/lib/arrange';
-import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
+import { ClipRenderer, THEMES, THEME_CATS, FORMATS, PLATFORMS, defaultScenario, loadImage, currentLine } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
 import { imageToJpeg, toB64, docxText } from '@/lib/importText';
 import { renderScore, chordSheet } from '@/lib/score';
 import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
+import { loadCutout } from '@/lib/cutout';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
@@ -45,6 +46,17 @@ const LEADS = { voix: 'Chœur (aah)', piano: 'Piano à queue', sax: 'Saxophone t
 const CHORDS = { '': 'Auto (style)', piano: 'Piano à queue', epiano: 'Piano Rhodes', pluck: 'Guitare acoustique', nylon: 'Guitare classique', eguitar: 'Guitare électrique', power: 'Guitare saturée', strings: 'Cordes', choir: 'Chœur', synthpad: 'Nappe synthé', supersaw: 'Supersaw' };
 const HARMS = { off: 'Aucune', up3: 'Tierce au-dessus', down3: 'Tierce en dessous', up6: 'Sixte', oct: 'Octave' };
 const TYPES = { verse: 'Couplet', chorus: 'Refrain', bridge: 'Pont' };
+
+function freshFrom(prev, keep) {
+  const n = newSong('');
+  if (prev) n.artist = prev.artist || '';
+  if (keep && prev) {
+    ['style', 'bpm', 'swing', 'key', 'mode', 'kit', 'chordSound', 'leadSound', 'intro', 'introBars', 'drumsOn', 'harmony', 'guide', 'fr', 'drums', 'layers', 'mix'].forEach((k) => { if (prev[k] !== undefined) n[k] = structuredClone(prev[k]); });
+    n.clip = { ...n.clip, theme: prev.clip?.theme || null, format: prev.clip?.format || n.clip.format };
+  }
+  return n;
+}
+const styleLabel = (s) => `${tx(M.STYLES[s.style]?.n || s.style)} · ${s.bpm} BPM · ${tx('{n} instruments', { n: (s.layers || []).filter((l) => l.on !== false).length })}`;
 
 function newSong(lyrics = DEMO) {
   const s = {
@@ -104,6 +116,9 @@ export default function Page() {
   const [ocrFix, setOcrFix] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [fs, setFs] = useState(null);
+  const [cam, setCam] = useState(false);
+  const [themeCat, setThemeCat] = useState(null);
+  const [folds, setFolds] = useState({});
   const [guide, setGuide] = useState({ on: false, step: 0 });
   const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
   const goStep = (i) => {
@@ -165,10 +180,25 @@ export default function Page() {
   };
   const load = (s) => {
     eng.current?.stop(); setPlaying(false);
-    ensureLayers(s); S.current = s; setSel(null); setAmb(M.suggestAmbiances(s.blocks)); setAmbSel(-1); lastBpm.current = s.bpm;
+    ensureLayers(s); S.current = s; setSel(null);
+    if (videoBg.current) { videoBg.current.pause?.(); videoBg.current = null; }
+    DB.getSong('video:' + s.id).then((r) => { if (r?.video && S.current.id === s.id) setVideoBg(r.video); }).catch(() => {}); setAmb(M.suggestAmbiances(s.blocks)); setAmbSel(-1); lastBpm.current = s.bpm;
     if (eng.current) s.tracks.forEach((t) => { t.buffer = t.data ? storeToBuffer(eng.current.ctx, { sr: t.sr, ch: [t.data] }) : null; });
     bump();
   };
+
+  // ---------- cartes repliables ----------
+  const FOLD_DEFAULT = ['Pads en direct', 'Importer un MP4 ou un audio', 'Exporter', 'Effets de la voix guide', 'Tempo', 'Style'];
+  useEffect(() => { try { setFolds(JSON.parse(localStorage.getItem('sonyria-folds') || '{}')); } catch (e) {} }, []);
+  useEffect(() => {
+    document.querySelectorAll('.app .card > h3').forEach((h) => {
+      if (h.closest('.fs, .sheet')) return;
+      const k = h.dataset.fk || (h.textContent || '').replace(/Plein écran|Full screen|Auto|Boucle|Loop/g, '').trim().slice(0, 40);
+      if (!k) return; h.dataset.fk = k; h.classList.add('foldable');
+      const def = FOLD_DEFAULT.some((f) => k.startsWith(tx(f)));
+      h.parentElement.classList.toggle('folded', folds[k] ?? def);
+    });
+  });
 
   // ---------- démarrage ----------
   useEffect(() => {
@@ -402,6 +432,24 @@ export default function Page() {
     const vd = document.createElement('video'); vd.src = URL.createObjectURL(file); vd.muted = true; vd.playsInline = true; vd.loop = true; vd.preload = 'auto';
     vd.load(); videoBg.current = vd; bump();
   };
+  const attachVideo = async (file, opts = {}) => {
+    setVideoBg(file);
+    up((s) => { s.clip = { ...s.clip, vMode: 'plein', vLoop: true, vOff: 0, mirror: false, vSound: 'app', ...opts }; });
+    try { await DB.saveSong({ id: 'video:' + song.id, video: file, updated: Date.now() }); } catch (e) {}
+  };
+  const removeVideo = async () => { if (videoBg.current) { videoBg.current.pause?.(); videoBg.current = null; } up((s) => { s.clip = { ...s.clip, vSound: 'app' }; }); try { await DB.deleteSong('video:' + song.id); } catch (e) {} };
+  const onFilmed = async (blob, o) => {
+    setCam(false);
+    await attachVideo(blob, { vLoop: false, mirror: o.mirror, cutout: !!o.cutout });
+    say(tx('Ta vidéo est dans le clip — exporte-la avec tes paroles'));
+    if (o.voice) {
+      try {
+        const e = await ensureAudio(); const buf = await e.ctx.decodeAudioData(await blob.arrayBuffer());
+        up((s) => mkTrack(s, tx('Voix (vidéo)'), buf.getChannelData(0), buf.sampleRate, 0, false, 'studio'));
+        song.tracks.forEach((t) => { if (!t.buffer && t.data) t.buffer = storeToBuffer(e.ctx, { sr: t.sr, ch: [t.data] }); });
+      } catch (err) {}
+    }
+  };
   const mkTrack = (s, name, data, sr, start, mute, fx = 'naturel') => s.tracks.push({ id: 't' + Date.now() + Math.random().toString(36).slice(2, 6), name, start, buffer: null, data, sr, vol: 0.9, pan: 0, fx, ...fxParams(fx), mute, solo: false });
   // Importe un MP4/audio et recrée la chanson : paroles, tempo, tonalité, accords, mélodie, karaoké
   const recreate = async (file) => {
@@ -615,16 +663,23 @@ export default function Page() {
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     if (!renderer.current || renderer.current.cv !== cv) renderer.current = new ClipRenderer(cv);
     renderer.current.setup(scenario, photos.current, videoBg.current);
+    if (song.clip.cutout) loadCutout().catch(() => {});
     let raf; const freq = new Uint8Array(512);
     const f = () => {
       const e = eng.current; const st = e?.songTime();
       if (e) e.analyser.getByteFrequencyData(freq);
       const vd = videoBg.current; if (vd) { if (e?.playing && vd.paused) vd.play().catch(() => {}); if (!e?.playing && !vd.paused) vd.pause(); }
+      const vs = song.clip.vSound || 'app';
+      if (vd && e) {
+        if (vs !== 'app' && !vd._g) { try { vd._src = e.ctx.createMediaElementSource(vd); vd._g = e.ctx.createGain(); vd._src.connect(vd._g).connect(e.out); vd.muted = false; } catch (err) {} }
+        if (vd._g) vd._g.gain.value = vs === 'app' ? 0 : 1;
+      }
+      const mOff = !!vd && vs === 'video'; if (e && e.musicOff !== mOff) { e.musicOff = mOff; e.applyLayers(song); }
       renderer.current.draw(st && !st.countIn ? st.t : (tl.lines[0]?.syl[0]?.g || 0) * s16(song.bpm) + 0.8, tl, song, e?.playing ? freq : null);
       raf = requestAnimationFrame(f);
     };
     f();
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); const e = eng.current; if (e?.musicOff) { e.musicOff = false; e.applyLayers(S.current); } };
   }, [tab, exporting, v]); // eslint-disable-line
   const aiClip = async () => {
     setBusy('clip');
@@ -689,6 +744,13 @@ export default function Page() {
     try { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().then(() => { if (k !== 'arr') screen.orientation?.lock?.('landscape').catch(() => {}); }).catch(() => {}); } catch (e) {}
   };
   const closeFs = () => { setFs(null); try { screen.orientation?.unlock?.(); if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} };
+  const toggleFold = (ev) => {
+    const h = ev.target.closest('.card > h3'); if (!h || h.closest('.fs, .sheet, .kara, .cam')) return;
+    if (ev.target.closest('button, input, select, label, a, textarea') && !ev.target.closest('.fold-btn')) return;
+    const k = h.dataset.fk; if (!k) return;
+    const nx = { ...folds, [k]: !h.parentElement.classList.contains('folded') };
+    setFolds(nx); try { localStorage.setItem('sonyria-folds', JSON.stringify(nx)); } catch (e) {}
+  };
   const TABS = [['paroles', 'new', 'Paroles'], ['melodie', 'note', 'Mélodie'], ['beat', 'drumkit', 'Beat'], ['studio', 'studio-mic', 'Studio'], ['table', 'sliders', 'Table'], ['clip', 'spectrum', 'Clip']];
 
   return (
@@ -698,7 +760,7 @@ export default function Page() {
       {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={doInstall}
         onFinish={(choice) => {
           setMe({ ...me, onboarded: true }); saveGuide({ on: true, step: 0 });
-          if (choice === 'paroles') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('paroles'); }
+          if (choice === 'paroles') { const n = freshFrom(S.current, !!S.current?.lyrics?.trim()); n.artist = me.artist || me.name || ''; load(n); setTab('paroles'); }
           else if (choice === 'import') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('studio'); }
           else { const n = newSong(getLang() === 'en' ? DEMO_EN : DEMO); n.artist = me.artist || me.name || ''; load(n); setTab('melodie'); }
         }} />}
@@ -725,7 +787,7 @@ export default function Page() {
           {TABS.map(([k, e, n]) => <button key={k} className={'tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}><span><Ico n={e} s={28} dim={tab !== k} /></span>{tx(n)}</button>)}
         </nav>
       </div>
-      <div className="app">
+      <div className="app" onClick={toggleFold}>
 
       {guide.on && me?.onboarded && (() => { const st = GUIDE[guide.step]?.tab === tab ? guide.step : Math.max(0, GUIDE.findIndex((x) => x.tab === tab)); return GUIDE[st].anchor === 'g-amb' ? null : <GuideCard step={st} go={goStep} hide={() => saveGuide({ ...guide, on: false })} />; })()}
       {/* ================= PAROLES ================= */}
@@ -760,7 +822,7 @@ export default function Page() {
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
-            <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = newSong(''); n.id = song.id; n.artist = song.artist; load(n); say(tx('Page blanche — on recommence')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
+            <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = freshFrom(song, true); n.id = song.id; load(n); say(tx('Page blanche — on garde ton style')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
@@ -964,6 +1026,11 @@ export default function Page() {
           <div className="sl" style={{ marginTop: 10 }}><span>{tx("Latence")}</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
           <div className="hint">{tx("Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.")}</div>
         </div>
+        <div className="card film-card">
+          <h3><Ico n="rec-button" s={28} /> {tx('Me filmer en chantant')}</h3>
+          <div className="hint" style={{ marginBottom: 10 }}>{tx('Choisis un fond (thème animé ou ta photo) : tu apparais devant le fond et tes paroles défilent en bas dans une case bien lisible. La vidéo va directement dans ton clip.')}</div>
+          <button className="btn pri wide" onClick={() => setCam(true)}><Ico n="rec-button" s={22} /> {tx('Ouvrir la caméra')}</button>
+        </div>
         <div className="card">
           <h3><Ico n="upload" s={28} /> {tx("Importer un MP4 ou un audio")}</h3>
           {busy === 'import' ? <div className="row"><span className="busy" /> {progress}</div> : <div className="row">
@@ -1017,15 +1084,35 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="spectrum" s={28} /> {tx("Vidéoclip animé")}</h3>
           <canvas ref={clipRef} className="clip-cv" />
+          <div className="vid-src">
+            <button className="btn pri" onClick={() => setCam(true)}><Ico n="rec-button" s={22} /> {tx('Me filmer')}</button>
+            <label className="btn"><Ic n="film" /> {tx('Importer mon clip')}<input type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files[0]; if (f) attachVideo(f, { vSound: 'app' }).then(() => say(tx('Vidéo ajoutée — tes paroles s’affichent par-dessus'))); e.target.value = ''; }} /></label>
+          </div>
+          <div className="hint">{tx('Filme-toi pendant que la chanson joue, ou importe un clip fait ailleurs (téléphone, CapCut…) : Sonyria ajoute tes paroles en karaoké par-dessus.')}</div>
+          {videoBg.current && <div className="vid-opts">
+            <div className="row"><b className="grow"><Ic n="film" /> {tx('Ma vidéo')}</b><button className="btn sm" onClick={removeVideo}><Ico n="trash" s={18} /> {tx('Retirer')}</button></div>
+            <label className="f">{tx('Affichage')}</label>
+            <div className="chips">{[['plein', 'Plein écran'], ['fond', 'En fond, avec animation']].map(([k, n]) => <button key={k} className={'chip' + ((song.clip.vMode || 'plein') === k ? ' on' : '')} onClick={() => up((s) => (s.clip.vMode = k))}>{tx(n)}</button>)}</div>
+            <label className="f">{tx('Son du clip')}</label>
+            <div className="chips">{[['app', 'Musique Sonyria'], ['video', 'Son de ma vidéo'], ['both', 'Les deux']].map(([k, n]) => <button key={k} className={'chip' + ((song.clip.vSound || 'app') === k ? ' on' : '')} onClick={() => up((s) => (s.clip.vSound = k))}>{tx(n)}</button>)}</div>
+            <label className="f">{tx('Caler la vidéo avec les paroles')} <small style={{ color: 'var(--dim)' }}>{(song.clip.vOff || 0) > 0 ? '+' : ''}{(song.clip.vOff || 0).toFixed(1)} s</small></label>
+            <input type="range" min="-20" max="20" step="0.1" value={song.clip.vOff || 0} onChange={(e) => up((s) => (s.clip.vOff = +e.target.value))} />
+            <div className="row" style={{ fontSize: 12.5, gap: 14 }}>
+              <label className="row nw"><input type="checkbox" checked={song.clip.vLoop !== false} onChange={(e) => up((s) => (s.clip.vLoop = e.target.checked))} /> {tx('Vidéo en boucle')}</label>
+              <label className="row nw"><input type="checkbox" checked={!!song.clip.mirror} onChange={(e) => up((s) => (s.clip.mirror = e.target.checked))} /> {tx('Effet miroir')}</label>
+              <label className="row nw"><input type="checkbox" checked={!!song.clip.cutout} onChange={(e) => { const on = e.target.checked; if (on) loadCutout().then(() => bump()).catch(() => say(tx('Le détourage n’a pas pu se charger (connexion).'))); up((s) => (s.clip.cutout = on)); }} /> {tx('Me détourer (fond derrière moi)')}</label>
+            </div>
+          </div>}
           <label className="f">{tx("Format prêt à publier (1080p)")}</label>
           <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{tx(p.n)} <small>{p.f}</small></button>)}</div>
-          <label className="f">{tx("Thème visuel")}</label>
-          <div className="chips">{Object.entries(THEMES).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          <label className="f">{tx("Thème visuel")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
+          <div className="chips cats">{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + ((themeCat || THEMES[scenario.theme]?.c || 'lum') === k ? ' on' : '')} onClick={() => setThemeCat(k)}>{tx(n)}</button>)}</div>
+          <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.lyrBox !== false} onChange={(e) => up((s) => (s.clip.lyrBox = e.target.checked))} /> {tx('Paroles dans une case qui s’adapte au fond (meilleur contraste)')}</label>
           <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
             <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <Magic kind="clip" /> : <><Ic n="sparkles" /> {tx('Scénario IA')}</>}</button>
-            <label className="btn"><Ic n="film" /> {tx("Vidéo de fond")}<input type="file" accept="video/*" hidden onChange={(e) => e.target.files[0] && setVideoBg(e.target.files[0])} /></label>
-            {videoBg.current && <button className="btn sm" onClick={() => { videoBg.current = null; bump(); }}><Ic n="x" /> {tx("Vidéo")}</button>}
+
             <label className="btn"><Ic n="images" /> {tx("Mes photos")}<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /></label>
             {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}><Ic n="undo" /> {tx("Thème simple")}</button>}
           </div>
@@ -1074,6 +1161,7 @@ export default function Page() {
         <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : startRec())} aria-label={tx("Enregistrer")}>{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
       </div></div>
 
+      {cam && <CamStudio song={song} tl={tl} eng={eng} ensureAudio={ensureAudio} play={play} stop={() => { eng.current?.stop(); setPlaying(false); }} onDone={onFilmed} onClose={() => setCam(false)} scenario={scenario} photos={() => photos.current} onPhotos={async (files) => { photos.current = (await Promise.all(files.slice(0, 12).map(loadImage))).filter(Boolean); bump(); }} />}
       {kara && <Karaoke song={song} tl={tl} eng={eng} playing={playing} rec={rec} onClose={() => setKara(false)} onPlay={() => (playing ? stop() : play({ from: 0 }))} onRec={() => (rec ? finishRec() : startRec())} />}
 
       {sheet && <div className="sheet-bg" onClick={() => setSheet(null)}><div className="sheet" onClick={(e) => e.stopPropagation()}>
@@ -1195,6 +1283,105 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+function CamStudio({ song, tl, eng, ensureAudio, play, stop, onDone, onClose, scenario, photos, onPhotos }) {
+  const vRef = useRef(null), cvRef = useRef(null), rdr = useRef(null);
+  const [cut, setCut] = useState(!!song.clip.cutout || true);
+  const [cutState, setCutState] = useState('');
+  useEffect(() => { if (!cut) return; setCutState('load'); loadCutout().then(() => setCutState('ok')).catch(() => { setCutState('fail'); setCut(false); }); }, [cut]);
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    const [W, H] = FORMATS[song.clip.format] || [1080, 1920]; cv.width = Math.round(W / 2); cv.height = Math.round(H / 2);
+    rdr.current = new ClipRenderer(cv);
+    let raf; const freq = new Uint8Array(512);
+    const f = () => {
+      const e = eng.current; const st = e?.songTime(); if (e) e.analyser.getByteFrequencyData(freq);
+      rdr.current.setup(scenario, photos(), vRef.current);
+      const tt = st && !st.countIn ? st.t : (tl.lines[0]?.syl[0]?.g || 0) * s16(song.bpm) + 0.8;
+      rdr.current.draw(tt, tl, { ...song, clip: { ...song.clip, vMode: 'plein', vLoop: true, vOff: 0, cutout: cut && cutState === 'ok', mirror: fac.current === 'user' } }, e?.playing ? freq : null);
+      raf = requestAnimationFrame(f);
+    };
+    f(); return () => cancelAnimationFrame(raf);
+  }, [cut, cutState, tl]); // eslint-disable-line
+  const [facing, setFacing] = useState('user');
+  const [stream, setStream] = useState(null);
+  const [state, setState] = useState('idle');
+  const [count, setCount] = useState(0);
+  const [withVoice, setWithVoice] = useState(false);
+  const [err, setErr] = useState('');
+  const [li, setLi] = useState(-1);
+  const [view, setView] = useState('clip');
+  const [prompt, setPrompt] = useState(true);
+  const mr = useRef(null), chunks = useRef([]), fac = useRef(facing);
+  fac.current = facing;
+  useEffect(() => {
+    let st, dead = false; setErr('');
+    (async () => {
+      try {
+        st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 } }, audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+        if (dead) { st.getTracks().forEach((x) => x.stop()); return; }
+        setStream(st); if (vRef.current) { vRef.current.srcObject = st; vRef.current.play().catch(() => {}); }
+      } catch (e) { setErr(tx('Caméra inaccessible : autorise la caméra et le micro dans ton navigateur.')); }
+    })();
+    return () => { dead = true; st?.getTracks().forEach((x) => x.stop()); };
+  }, [facing]);
+  useEffect(() => {
+    let raf, last = -2;
+    const f = () => { const st = eng.current?.songTime(); const c = st && !st.countIn ? currentLine(tl, song, st.t) : null; const i = c ? c.idx : -1; if (i !== last) { last = i; setLi(i); } raf = requestAnimationFrame(f); };
+    f(); return () => cancelAnimationFrame(raf);
+  }, [tl]); // eslint-disable-line
+  const finish = () => { if (mr.current && mr.current.state !== 'inactive') mr.current.stop(); stop(); setState('idle'); };
+  const start = async () => {
+    if (!stream) return;
+    await ensureAudio();
+    setState('count'); for (let i = 3; i > 0; i--) { setCount(i); await new Promise((r) => setTimeout(r, 800)); }
+    const ms = new MediaStream(withVoice ? stream.getTracks() : stream.getVideoTracks());
+    const mime = pickMime(true);
+    let rec; try { rec = new MediaRecorder(ms, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000 } : {}); } catch (e) { rec = new MediaRecorder(ms); }
+    chunks.current = []; rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
+    rec.onstop = () => { const blob = new Blob(chunks.current, { type: rec.mimeType || 'video/webm' }); if (blob.size) onDone(blob, { mirror: fac.current === 'user', voice: withVoice, cutout: cut && cutState === 'ok' }); };
+    mr.current = rec; rec.start(500);
+    play({ from: 0, onEnd: () => setTimeout(finish, 300) });
+    setState('rec');
+  };
+  const lineH = 66;
+  const shown = Math.max(0, li);
+  return (
+    <div className="cam">
+      <video ref={vRef} className={'cam-src' + (view === 'cam' ? ' show' + (facing === 'user' ? ' mir' : '') : '')} playsInline muted />
+      <div className="cam-top">
+        <button className="btn sm" onClick={() => { finish(); onClose(); }}><Ic n="x" /> {tx('Fermer')}</button>
+        <span className="grow" />
+        {state === 'rec' && <span className="cam-rec"><span className="rec-dot" /> REC</span>}
+        <button className="btn sm" disabled={state !== 'idle'} onClick={() => setFacing(facing === 'user' ? 'environment' : 'user')}><Ic n="camera" /> {tx('Tourner')}</button>
+      </div>
+      <div className="cam-stage">
+        <canvas ref={cvRef} className={'cam-v' + (view === 'cam' ? ' hide' : '')} />
+        {prompt && tl.lines.length > 0 && <div className="prompter">
+          <div className="prompter-in" style={{ transform: `translateY(${-shown * lineH}px)` }}>
+            {tl.lines.map((l, i) => <div key={i} className={'pl' + (i === li ? ' now' : i < li ? ' past' : '')} style={{ height: lineH }}>{l.first && <small>{M.localLabel(l.label)}</small>}{l.text}</div>)}
+          </div>
+        </div>}
+        {err && <div className="cam-err">{err}</div>}
+        {state === 'count' && <div className="cam-count">{count}</div>}
+      </div>
+      <div className="cam-bot">
+        {state === 'idle' && <div className="chips" style={{ justifyContent: 'center' }}>
+          <button className={'chip' + (view === 'clip' ? ' on' : '')} onClick={() => setView(view === 'clip' ? 'cam' : 'clip')}><Ic n="film" size={14} /> {tx('Clip en direct')}</button>
+          <button className={'chip' + (prompt ? ' on' : '')} onClick={() => setPrompt(!prompt)}><Ic n="file" size={14} /> {tx("Téléprompteur")}</button>
+          <button className={'chip' + (cut ? ' on' : '')} onClick={() => setCut(!cut)}>{cutState === 'load' && cut ? <span className="busy" /> : <Ic n="sparkles" size={14} />} {tx('Fond derrière moi')}</button>
+          <label className="chip"><Ic n="images" size={14} /> {tx('Mon fond (photo)')}<input type="file" accept="image/*" multiple hidden onChange={(e) => onPhotos([...e.target.files])} /></label>
+          <label className="chip"><input type="checkbox" checked={withVoice} onChange={(e) => setWithVoice(e.target.checked)} /> {tx('Garder ma voix (écouteurs)')}</label>
+        </div>}
+        {cutState === 'fail' && <div className="hint" style={{ textAlign: 'center' }}>{tx('Le détourage n’a pas pu se charger (connexion). Ta vidéo garde son vrai fond.')}</div>}
+        <div className="row nw" style={{ justifyContent: 'center', gap: 16 }}>
+          <button className={'cam-btn' + (state === 'rec' ? ' on' : '')} disabled={!stream || state === 'count'} onClick={() => (state === 'rec' ? finish() : start())} aria-label={tx('Enregistrer')}><span /></button>
+        </div>
+        <div className="hint" style={{ textAlign: 'center' }}>{state === 'rec' ? tx('Touche pour arrêter') : tx('Ta caméra est enregistrée seule : tu pourras changer le fond, le thème et les paroles du clip ensuite.')}</div>
+      </div>
+    </div>
+  );
 }
 
 function Structure({ song, up, tl, play, clock }) {
@@ -1493,6 +1680,7 @@ function SongsSheet({ song, me, load, close, say }) {
   const [list, setList] = useState(null);
   const [arm, setArm] = useState(null);
   const [withRec, setWithRec] = useState(true);
+  const [ask, setAsk] = useState(false);
   const [sharing, setSharing] = useState(false);
   const fileIn = useRef(null);
   const hasRec = song.tracks?.some((t) => t.data);
@@ -1518,6 +1706,15 @@ function SongsSheet({ song, me, load, close, say }) {
   useEffect(() => { refresh(); }, []);
   return <>
     <h3><Ico n="folder" s={28} /> {tx("Mes chansons")}</h3>
+    {ask && <div className="ask-style">
+      <b>{tx('On reste dans le même style ?')}</b>
+      <div className="hint">{styleLabel(song)}</div>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn pri" onClick={() => { load(freshFrom(song, true)); close(); say(tx('Nouvelle chanson dans le même style')); }}><Ic n="check" /> {tx('Oui, même style')}</button>
+        <button className="btn" onClick={() => { load(freshFrom(song, false)); close(); }}>{tx('Non, nouveau style')}</button>
+        <button className="mini" onClick={() => setAsk(false)}><Ic n="x" /></button>
+      </div>
+    </div>}
     <div className="share-box">
       <b><Ico n="share" s={22} /> {tx('Partager avec quelqu’un qui a Sonyria')}</b>
       <div className="row" style={{ marginTop: 8 }}>
@@ -1529,7 +1726,7 @@ function SongsSheet({ song, me, load, close, say }) {
       <div className="hint" style={{ marginTop: 6 }}>{tx('Tout est inclus : paroles, mélodie, accords, beat, instruments et structure. L’autre personne ouvre le fichier .sonyria dans son app et peut le modifier.')}</div>
     </div>
     <div className="row" style={{ marginBottom: 10 }}>
-      <button className="btn pri" onClick={() => { load(newSong('')); close(); }}>{tx("＋ Nouvelle chanson")}</button>
+      <button className="btn pri" onClick={() => { if (song.lyrics?.trim() || song.tracks?.length) setAsk(true); else { load(freshFrom(song, false)); close(); } }}>{tx("＋ Nouvelle chanson")}</button>
       {list?.length > 0 && <button className="btn" style={{ color: 'var(--pink)' }} onClick={async () => {
         if (arm !== 'all') { setArm('all'); say(tx('Touche encore pour tout supprimer')); return; }
         for (const x of list) await DB.deleteSong(x.id);

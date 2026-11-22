@@ -463,3 +463,45 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .struct-row .mini:disabled { opacity: .25; }
 .share-box { padding: 12px; border-radius: 14px; margin-bottom: 12px; background: linear-gradient(135deg, rgba(34,211,238,.08), rgba(168,85,247,.10)); border: 1px solid var(--line); }
 .share-box b { display: flex; align-items: center; gap: 8px; }
+/* ===== cartes repliables ===== */
+.card > h3.foldable { cursor: pointer; user-select: none; }
+.card > h3.foldable::after { content: ''; width: 9px; height: 9px; margin-left: 10px; flex: none; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim); transform: rotate(45deg) translateY(-3px); transition: transform .2s; }
+.card.folded > h3.foldable::after { transform: rotate(-45deg); }
+.card.folded > :not(h3) { display: none !important; }
+.card.folded { padding-bottom: 10px; }
+.card.folded > h3 { margin-bottom: 0; }
+/* ===== nouvelle chanson : même style ? ===== */
+.ask-style { padding: 12px; border-radius: 14px; margin-bottom: 12px; border: 1px solid var(--cyan); background: rgba(34,211,238,.07); }
+/* ===== clip : vidéo ===== */
+.vid-src { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
+.vid-opts { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--line); }
+.vid-opts input[type=range] { width: 100%; }
+.chips.cats .chip { font-weight: 700; }
+/* ===== caméra ===== */
+.cam { position: fixed; inset: 0; z-index: 120; background: #000; display: flex; flex-direction: column; }
+.cam-src { position: absolute; width: 2px; height: 2px; opacity: 0; pointer-events: none; }
+.cam-v { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%; width: auto; height: 100%; object-fit: contain; }
+.cam-top { position: relative; z-index: 2; display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-t) + 8px) 12px 8px; background: linear-gradient(180deg, rgba(0,0,0,.6), transparent); }
+.cam-rec { display: flex; align-items: center; gap: 6px; font: 700 13px 'JetBrains Mono', monospace; color: #ef4444; }
+.cam-err { position: relative; z-index: 2; margin: 20px; padding: 12px; border-radius: 12px; background: rgba(239,68,68,.2); border: 1px solid #ef4444; }
+.cam-count { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; font: 800 140px Sora, sans-serif; color: #fff; text-shadow: 0 0 40px var(--purple); pointer-events: none; }
+.cam-bot { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 12px calc(var(--safe-b) + 14px); background: linear-gradient(0deg, rgba(0,0,0,.7), transparent); }
+.cam-btn { width: 76px; height: 76px; border-radius: 50%; border: 4px solid #fff; display: grid; place-items: center; background: transparent; }
+.cam-btn span { width: 58px; height: 58px; border-radius: 50%; background: #ef4444; transition: all .2s; }
+.cam-btn.on span { width: 30px; height: 30px; border-radius: 8px; }
+.cam-btn:disabled { opacity: .4; }
+.cam-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.cam .cam-v { position: absolute; inset: 0; margin: auto; height: 100%; width: auto; max-width: 100%; object-fit: contain; }
+.cam .cam-v.hide { display: none; }
+.cam-src.show { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 1; object-fit: cover; z-index: 0; top: 0; }
+.cam-src.mir { transform: scaleX(-1); }
+.cam-top { z-index: 3; }
+.cam-bot { position: relative; background: #05040b; border-top: 1px solid var(--line); z-index: 3; }
+.cam-bot .chips { gap: 6px; }
+.cam-bot .chip input { margin: 0 4px 0 0; }
+.prompter { position: absolute; left: 8px; right: 8px; top: 8px; height: 200px; overflow: hidden; border-radius: 16px; background: rgba(5,4,11,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.12); z-index: 2; mask-image: linear-gradient(180deg, #000 70%, transparent); -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent); }
+.prompter-in { transition: transform .45s ease; padding-top: 6px; }
+.prompter .pl { display: flex; flex-direction: column; justify-content: center; padding: 0 14px; font: 700 18px/1.15 Sora, sans-serif; color: rgba(255,255,255,.55); text-align: center; overflow: hidden; }
+.prompter .pl small { font: 600 10px 'JetBrains Mono', monospace; color: var(--cyan); text-transform: uppercase; letter-spacing: .08em; }
+.prompter .pl.now { color: #fff; font-size: 21px; text-shadow: 0 0 18px rgba(34,211,238,.6); }
+.prompter .pl.past { color: rgba(255,255,255,.25); }

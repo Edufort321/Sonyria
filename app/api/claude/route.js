@@ -12,7 +12,7 @@ function apiKey() {
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const STYLES = ['pop', 'ballade', 'hiphop', 'trap', 'rnb', 'rock', 'folk', 'reggaeton', 'afro', 'edm', 'lofi', 'jazz'];
-const THEMES = ['neon', 'galaxie', 'ville', 'pluie', 'ocean', 'feu', 'aurore', 'onde'];
+const THEMES = ['neon (néon rétro)', 'onde (ondes sonores)', 'bokeh (lumières floues)', 'club (lasers)', 'concert (scène, foule)', 'feux (feux d’artifice)', 'coucher (coucher de soleil sur la mer)', 'plage', 'ocean', 'sousmarin', 'montagnes (aube)', 'foret (lucioles)', 'neige', 'desert (nuit étoilée)', 'ciel (nuages)', 'cerisiers', 'aurore (boréale)', 'etoiles (voie lactée)', 'galaxie', 'ville', 'skyline (gratte-ciel)', 'route (de nuit)', 'pluie', 'vitre (pluie sur la vitre)', 'amour (cœurs)', 'chandelles', 'lumiere (rayons, spirituel)', 'fumee', 'feu', 'noel', 'halloween', 'vhs (rétro)', 'film (vieux film)', 'vinyle'];
 
 function prompt(task, p) {
   const out = p.lang === 'en' ? 'English' : 'French';
@@ -77,7 +77,7 @@ ${JSON.stringify(p.lines)}`;
   }
   if (task === 'clip') {
     return `Tu es réalisateur de vidéoclips. À partir de ces paroles, écris le scénario visuel d'un clip animé (généré par code : fonds animés, particules, spectre audio, paroles karaoké).
-Thèmes visuels disponibles : ${THEMES.join(', ')}. Palettes : 3 couleurs hexadécimales vives qui vont bien sur fond noir.
+Thèmes visuels disponibles (utilise seulement le mot-clé avant la parenthèse) : ${THEMES.join(', ')}. Choisis des thèmes réalistes qui collent à l’imaginaire de chaque section et varie-les d’une section à l’autre. Palettes : 3 couleurs hexadécimales vives qui vont bien sur fond noir.
 Pour chaque section (utilise exactement les libellés fournis), choisis un thème, une palette, une intensité 0.3-1 et 2 à 4 mots-clés courts tirés de l'imaginaire du texte (en majuscules dans la langue des paroles).
 "textStyle" : "karaoke" ou "bounce".
 Réponds UNIQUEMENT avec ce JSON :
