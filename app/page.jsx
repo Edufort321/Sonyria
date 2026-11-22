@@ -14,7 +14,7 @@ import { renderScore, chordSheet } from '@/lib/score';
 import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
-import { makeBacking, BACKS } from '@/lib/backing';
+import { makeBacking, BACKS, tune, gate, normalize, fades, trimStart } from '@/lib/backing';
 import { newCode, prettyCode, normCode, loadSpaces, saveSpaces, syncSpace, syncReady, peekSpace } from '@/lib/sync';
 import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/lib/cover';
 import Ic, { IconDefs, Ico } from './Ic';
@@ -525,6 +525,31 @@ export default function Page() {
       say(tx('Back vocal ajouté — ajuste son volume et son écho')); snapshot(tx('Back vocals ajoutés'));
     } catch (err) { say(tx('Back vocal impossible')); }
     setBusy('');
+  };
+  // améliorer une prise : l'original est gardé pour revenir en arrière
+  const improve = async (t, op) => {
+    if (!t.data) return;
+    setBusy('fix'); await new Promise((r) => setTimeout(r, 40));
+    try {
+      const e = await ensureAudio();
+      const src = t.data; let out = src, start = t.start;
+      if (op === 'tune1') out = tune(src, t.sr, song.key, song.mode, 0.5);
+      if (op === 'tune2') out = tune(src, t.sr, song.key, song.mode, 0.85);
+      if (op === 'tune3') out = tune(src, t.sr, song.key, song.mode, 1);
+      if (op === 'gate') out = gate(src, t.sr);
+      if (op === 'norm') out = normalize(src);
+      if (op === 'fade') out = fades(src, t.sr);
+      if (op === 'trim') { const r = trimStart(src, t.sr); out = r.data; start = t.start + r.off; }
+      if (op === 'all') { const r = trimStart(src, t.sr); out = normalize(fades(gate(r.data, t.sr), t.sr)); start = t.start + r.off; }
+      up((s) => { const x = s.tracks.find((y) => y.id === t.id); if (!x) return; if (!x.orig) { x.orig = x.data; x.origStart = x.start; } x.data = out; x.start = start; x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [out] }); x.fixes = [...(x.fixes || []), op]; });
+      say(tx('Prise améliorée — tu peux revenir à l’originale'));
+    } catch (err) { say(tx('Traitement impossible')); }
+    setBusy('');
+  };
+  const restoreTake = async (t) => {
+    const e = await ensureAudio();
+    up((s) => { const x = s.tracks.find((y) => y.id === t.id); if (!x?.orig) return; x.data = x.orig; x.start = x.origStart ?? x.start; x.orig = null; x.fixes = []; x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
+    say(tx('Prise originale rétablie'));
   };
   const lastSnap = useRef(0);
   const snapshot = async (name, kind = 'auto') => {
@@ -1236,6 +1261,21 @@ export default function Page() {
               <button className="tgl" aria-label={tx("Supprimer")} onClick={() => { if (confirmDel.current === t.id) up((s) => (s.tracks = s.tracks.filter((x) => x.id !== t.id))); else { confirmDel.current = t.id; say(tx('Touche encore la corbeille pour supprimer')); } }}><Ico n="trash" s={22} /></button>
             </div>
             <Wave track={t} />
+            <Sub k={'fix-' + t.id} t={tx('Améliorer cette prise')} note={(t.fixes || []).length ? tx('{n} retouche(s)', { n: t.fixes.length }) : ''}>
+              <div className="chips">
+                <button className="chip on" disabled={busy === 'fix'} onClick={() => improve(t, 'all')}><Ic n="wand" size={14} /> {tx('Tout en un clic')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune1')}>{tx('Justesse légère')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune2')}>{tx('Justesse forte')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune3')}>{tx('Effet robot (auto-tune)')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'gate')}>{tx('Nettoyer le bruit')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'norm')}>{tx('Volume égal')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'fade')}>{tx('Fondus début et fin')}</button>
+                <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'trim')}>{tx('Couper le silence du début')}</button>
+              </div>
+              {busy === 'fix' && <div className="row"><span className="busy" /> {tx('Sonyria retouche ta voix…')}</div>}
+              {t.orig && <button className="btn sm" style={{ marginTop: 6 }} onClick={() => restoreTake(t)}><Ic n="undo" /> {tx('Revenir à la prise originale')}</button>}
+              <div className="hint">{tx('« Tout en un clic » : coupe le silence du début, nettoie le bruit, égalise le volume et ajoute des fondus. La justesse ramène tes notes dans la gamme de la chanson.')}</div>
+            </Sub>
             {!t.back ? <div className="backs">
               <b><Ico n="voice-wave" s={18} /> {tx('Back vocals à partir de cette voix')}</b>
               <div className="chips">{Object.entries(BACKS).map(([k, b]) => <button key={k} className="chip" disabled={busy === 'back'} onClick={() => addBacking(t, k)}>{tx(b.n)}</button>)}
@@ -2069,6 +2109,9 @@ function Mixer({ song, up, eng, playing, onFull }) {
         <Strip name={tx("Master")} icon="speaker" val={m.master} meter={lv.master} set={(x) => up((s) => (s.mix.master = x))} />
       </div>
       {!playing && <div className="hint" style={{ marginTop: 8 }}>{tx("Lance la lecture pour voir les vumètres bouger.")}</div>}
+      <label className="f">{tx('Mastering (son final)')}</label>
+      <div className="chips">{[['naturel', 'Naturel'], ['radio', 'Radio (fort et clair)'], ['basses', 'Plus de basses'], ['doux', 'Doux et chaud'], ['live', 'Live']].map(([k, n]) => <button key={k} className={'chip' + ((m.preset || 'naturel') === k ? ' on' : '')} onClick={() => up((s) => (s.mix.preset = k))}>{tx(n)}</button>)}</div>
+      <div className="hint">{tx('S’applique à l’écoute et aux exports (WAV, MP4, clip). Un limiteur évite que ça sature.')}</div>
     </div>
     <div className="card">
       <h3><Ico n="fx" s={28} /> {tx("Effets de la voix guide")}</h3>
