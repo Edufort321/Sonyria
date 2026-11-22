@@ -5,6 +5,7 @@ import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
 import { KITS } from '@/lib/samples';
 import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer } from '@/lib/arrange';
+import { LOOKS, OVERLAYS, SPECTRA, TEXT_STYLES } from '@/lib/video';
 import { ClipRenderer, THEMES, THEME_CATS, FORMATS, PLATFORMS, defaultScenario, loadImage, currentLine } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
@@ -127,6 +128,7 @@ export default function Page() {
   useEffect(() => { if (!coverUrl) { coverImg.current = null; return; } const im = new Image(); im.onload = () => { coverImg.current = im; }; im.src = coverUrl; }, [coverUrl]);
   const [cam, setCam] = useState(false);
   const [themeCat, setThemeCat] = useState(null);
+  const [decor, setDecor] = useState('anim');
   const [folds, setFolds] = useState({});
   const [guide, setGuide] = useState({ on: false, step: 0 });
   const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
@@ -1298,15 +1300,31 @@ export default function Page() {
           <label className="f">{tx("Format prêt à publier (1080p)")}</label>
           <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{tx(p.n)} <small>{p.f}</small></button>)}</div>
           </Sub>
-          <Sub k="clip-theme" t={tx('Thème visuel')} note={tx(THEMES[scenario.theme]?.n || '')} open>
-          <label className="f">{tx("Thème visuel")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
+          <Sub k="clip-theme" t={tx('Décor')} note={videoBg.current ? tx('Ma vidéo') : tx(THEMES[scenario.theme]?.n || '')} open>
+          <div className="chips seg">
+            {[['anim', 'Décor animé'], ['video', 'Vidéos réelles'], ['photo', 'Photos réelles']].map(([k, n]) => <button key={k} className={'chip' + (decor === k ? ' on' : '')} onClick={() => setDecor(k)}>{tx(n)}</button>)}
+          </div>
+          {decor !== 'anim' ? <RealMedia kind={decor} orient={song.clip.format === '16:9' ? 'landscape' : song.clip.format === '1:1' ? 'square' : 'portrait'} say={say}
+            onVideo={(blob) => { attachVideo(blob, { vMode: 'plein', vLoop: true, vSound: 'app', cutout: false, mirror: false }).then(() => say(tx('Vidéo réelle ajoutée au clip'))); }}
+            onPhotos={async (blobs) => { photos.current = (await Promise.all(blobs.map((b) => loadImage(b)))).filter(Boolean); if (videoBg.current) removeVideo(); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /> : <>
+          <label className="f">{tx("Décor animé")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
           <div className="chips cats">{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + ((themeCat || THEMES[scenario.theme]?.c || 'lum') === k ? ' on' : '')} onClick={() => setThemeCat(k)}>{tx(n)}</button>)}</div>
-          <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c !== 'old').filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          </>}
+          </Sub>
+          <Sub k="clip-look" t={tx('Visuel : couleurs et effets')} note={[tx(LOOKS[song.clip.look || 'naturel']), ...(song.clip.overlays || []).map((o) => tx(OVERLAYS[o]))].join(' · ')}>
+          <label className="f">{tx('Couleurs')}</label>
+          <div className="chips">{Object.entries(LOOKS).map(([k, n]) => <button key={k} className={'chip' + ((song.clip.look || 'naturel') === k ? ' on' : '')} onClick={() => up((s) => (s.clip.look = k))}>{tx(n)}</button>)}</div>
+          <label className="f">{tx('Effets (plusieurs possibles)')}</label>
+          <div className="chips">{Object.entries(OVERLAYS).map(([k, n]) => { const on = (song.clip.overlays || []).includes(k); return <button key={k} className={'chip' + (on ? ' on' : '')} onClick={() => up((s) => { const a = s.clip.overlays || []; s.clip.overlays = on ? a.filter((x) => x !== k) : [...a, k]; })}>{tx(n)}</button>; })}</div>
+          <label className="f">{tx('Spectre audio')}</label>
+          <div className="chips">{Object.entries(SPECTRA).map(([k, n]) => <button key={k} className={'chip' + ((song.clip.spectrum || 'cercle') === k ? ' on' : '')} onClick={() => up((s) => (s.clip.spectrum = k))}>{tx(n)}</button>)}</div>
           </Sub>
           <Sub k="clip-opt" t={tx('Paroles, pochette et scénario IA')}>
           <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.disc !== false} onChange={(e) => up((s) => (s.clip.disc = e.target.checked))} /> {coverUrl ? tx('Pastille de ma pochette qui tourne (style TikTok)') : tx('Pastille de pochette (crée ta pochette dans Mon album)')}</label>
           <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.lyrBox !== false} onChange={(e) => up((s) => (s.clip.lyrBox = e.target.checked))} /> {tx('Paroles dans une case qui s’adapte au fond (meilleur contraste)')}</label>
-          <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
+          <label className="f">{tx('Animation des paroles')}</label>
+          <div className="chips">{Object.entries(TEXT_STYLES).map(([k, n]) => <button key={k} className={'chip' + ((song.clip.textStyle || scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.textStyle = k; })}>{tx(n)}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
             <button className="btn ai" disabled={!!busy} onClick={aiClip}>{busy === 'clip' ? <Magic kind="clip" /> : <><Ic n="sparkles" /> {tx('Scénario IA')}</>}</button>
 
@@ -1743,6 +1761,46 @@ function Sub({ k, t, note, open, children }) {
   return <div className={'sub' + (o ? ' open' : '')}>
     <button type="button" className="sub-h" onClick={tog}><span>{t}</span>{note ? <small>{note}</small> : null}<i /></button>
     {o && <div className="sub-b">{children}</div>}
+  </div>;
+}
+
+const REAL_IDEAS = [['Coucher de soleil', 'sunset ocean'], ['Plage', 'beach waves'], ['Ville la nuit', 'city night lights'], ['Route de nuit', 'night drive road'], ['Pluie', 'rain window'], ['Forêt', 'forest sunlight'], ['Montagnes', 'mountains clouds'], ['Concert', 'concert crowd lights'], ['Amour', 'couple love silhouette'], ['Neige', 'snow falling'], ['Sous l’eau', 'underwater light'], ['Ciel étoilé', 'starry night sky'], ['Fumée', 'smoke colorful'], ['Danse', 'dancing silhouette'], ['Feu', 'fire flames'], ['Fleurs', 'flowers wind'], ['Nuages', 'clouds timelapse'], ['Studio', 'recording studio microphone']];
+function RealMedia({ kind, orient, onVideo, onPhotos, say }) {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [ready, setReady] = useState(null);
+  const [picked, setPicked] = useState([]);
+  useEffect(() => { fetch('/api/stock').then((r) => r.json()).then((j) => setReady(!!j.ready)).catch(() => setReady(false)); }, []);
+  useEffect(() => { setItems(null); setPicked([]); }, [kind]);
+  const search = async (query) => {
+    const qq = (query || q).trim(); if (!qq) return; setQ(qq); setBusy('search');
+    try { const j = await fetch(`/api/stock?kind=${kind}&orient=${orient}&lang=${getLang()}&q=${encodeURIComponent(qq)}`).then((r) => r.json()); if (j.error) throw new Error(j.error); setItems(j.items || []); }
+    catch (e) { say(tx('Recherche impossible : {e}', { e: e.message })); }
+    setBusy('');
+  };
+  const grab = async (url) => {
+    try { const r = await fetch(url); if (r.ok) return await r.blob(); } catch (e) {}
+    const r2 = await fetch('/api/stock/file?u=' + encodeURIComponent(url)); if (!r2.ok) throw new Error('download'); return r2.blob();
+  };
+  const pickVideo = async (it) => { setBusy(String(it.id)); try { onVideo(await grab(it.url)); } catch (e) { say(tx('Téléchargement impossible')); } setBusy(''); };
+  const usePhotos = async () => { setBusy('photos'); try { const blobs = []; for (const it of items.filter((x) => picked.includes(x.id))) blobs.push(await grab(it.url)); onPhotos(blobs); setPicked([]); } catch (e) { say(tx('Téléchargement impossible')); } setBusy(''); };
+  if (ready === false) return <div className="hint" style={{ marginTop: 8 }}>{tx('Les vidéos et photos réelles ne sont pas encore activées : il faut ajouter une clé Pexels (gratuite) dans Vercel.')}</div>;
+  return <div className="real">
+    <div className="row nw" style={{ marginTop: 8 }}>
+      <input type="text" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder={kind === 'video' ? tx('Chercher une vidéo (ex. coucher de soleil)') : tx('Chercher des photos')} />
+      <button className="btn sm pri" onClick={() => search()} disabled={busy === 'search'}>{busy === 'search' ? <span className="busy" /> : tx('Chercher')}</button>
+    </div>
+    <div className="chips" style={{ marginTop: 6 }}>{REAL_IDEAS.map(([fr, en]) => <button key={en} className="chip" onClick={() => search(getLang() === 'en' ? en : fr)}>{tx(fr)}</button>)}</div>
+    {items && (!items.length ? <div className="hint">{tx('Aucun résultat — essaie un autre mot.')}</div> : <div className="real-grid">
+      {items.map((it) => <button key={it.id} className={'real-it' + (picked.includes(it.id) ? ' on' : '')} onClick={() => kind === 'video' ? pickVideo(it) : setPicked((p) => (p.includes(it.id) ? p.filter((x) => x !== it.id) : [...p, it.id].slice(-12)))}>
+        <img src={it.thumb} alt="" loading="lazy" />
+        {kind === 'video' && <small>{it.dur}s</small>}
+        {busy === String(it.id) && <span className="busy" />}
+      </button>)}
+    </div>)}
+    {kind === 'photo' && picked.length > 0 && <button className="btn pri wide" style={{ marginTop: 8 }} disabled={busy === 'photos'} onClick={usePhotos}>{busy === 'photos' ? <span className="busy" /> : <Ic n="check" />} {tx('Utiliser {n} photo(s) en fond', { n: picked.length })}</button>}
+    <div className="hint" style={{ marginTop: 6 }}>{kind === 'video' ? tx('Touche une vidéo : elle devient le fond de ton clip, tes paroles par-dessus.') : tx('Choisis jusqu’à 12 photos : elles défilent une par ligne de paroles.')} {tx('Vidéos et photos de Pexels, libres de droits.')}</div>
   </div>;
 }
 

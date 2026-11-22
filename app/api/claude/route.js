@@ -12,7 +12,7 @@ function apiKey() {
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const STYLES = ['pop', 'ballade', 'hiphop', 'trap', 'rnb', 'rock', 'folk', 'reggaeton', 'afro', 'edm', 'lofi', 'jazz'];
-const THEMES = ['neon (néon rétro)', 'onde (ondes sonores)', 'bokeh (lumières floues)', 'club (lasers)', 'concert (scène, foule)', 'feux (feux d’artifice)', 'coucher (coucher de soleil sur la mer)', 'plage', 'ocean', 'sousmarin', 'montagnes (aube)', 'foret (lucioles)', 'neige', 'desert (nuit étoilée)', 'ciel (nuages)', 'cerisiers', 'aurore (boréale)', 'etoiles (voie lactée)', 'galaxie', 'ville', 'skyline (gratte-ciel)', 'route (de nuit)', 'pluie', 'vitre (pluie sur la vitre)', 'amour (cœurs)', 'chandelles', 'lumiere (rayons, spirituel)', 'fumee', 'feu', 'noel', 'halloween', 'vhs (rétro)', 'film (vieux film)', 'vinyle'];
+const THEMES = ['neon (néon rétro)', 'onde (ondes sonores)', 'bokeh (lumières floues)', 'club (lasers)', 'concert (scène, foule)', 'feux (feux d’artifice)', 'coucher (coucher de soleil sur la mer)', 'plage', 'ocean', 'sousmarin', 'montagnes (aube)', 'foret (lucioles)', 'neige', 'desert (nuit étoilée)', 'ciel (nuages)', 'cerisiers', 'aurore (boréale)', 'etoiles (voie lactée)', 'galaxie', 'ville', 'skyline (gratte-ciel)', 'route (de nuit)', 'pluie', 'vitre (pluie sur la vitre)', 'amour (cœurs)', 'chandelles', 'lumiere (rayons, spirituel)', 'fumee', 'feu', 'noel', 'halloween', 'vinyle', 'orage', 'automne', 'lavande', 'lac (montagne)', 'espace (planètes)', 'cyberpunk (ville néon sous la pluie)'];
 
 function prompt(task, p) {
   const out = p.lang === 'en' ? 'English' : 'French';
