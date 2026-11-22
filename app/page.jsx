@@ -370,6 +370,7 @@ export default function Page() {
     setBusy('');
   };
   // Dépôt de compositions : photos de manuscrits, PDF, Word, texte
+  const addOcr = (lyrics, title, note) => setOcr((prev) => (prev ? { ...prev, lyrics: [prev.lyrics.trim(), String(lyrics || '').trim()].filter(Boolean).join('\n\n'), pages: (prev.pages || 1) + 1 } : { lyrics: String(lyrics || '').trim(), title, note, pages: 1 }));
   const importCompositions = async (files) => {
     files = [...files]; if (!files.length) return;
     const imgs = files.filter((f) => f.type.startsWith('image/'));
@@ -380,26 +381,45 @@ export default function Page() {
     try {
       if (txt && !imgs.length && !pdf && !docx) {
         const t = (await txt.text()).replace(/\{\\[^}]*\}|\\[a-z]+\d* ?/g, '').trim();
-        setOcr({ lyrics: t, title: txt.name.replace(/\.[^.]+$/, ''), note: '' });
+        addOcr(t, txt.name.replace(/\.[^.]+$/, ''), '');
       } else if (docx && !imgs.length && !pdf) {
-        setOcr({ lyrics: await docxText(docx), title: docx.name.replace(/\.[^.]+$/, ''), note: '' });
+        addOcr(await docxText(docx), docx.name.replace(/\.[^.]+$/, ''), '');
       } else if (pdf) {
         if (pdf.size > 3_000_000) throw new Error(tx('PDF trop lourd (3 Mo max). Envoie plutôt des photos des pages.'));
         const d = await ai('ocr', { kind: 'pdf', pdf: await toB64(pdf), correct: ocrFix });
-        setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
+        addOcr(String(d.lyrics || '').replace(/\\n/g, '\n'), d.title || '', d.note || '');
       } else {
-        const images = [];
-        for (const f of imgs.slice(0, 8)) images.push(await imageToJpeg(f, imgs.length > 3 ? 1500 : 1800));
-        const d = await ai('ocr', { kind: 'images', images, correct: ocrFix });
-        setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
+        // une page à la fois : plus fiable et sans limite de taille; les pages s'ajoutent à la suite
+        const parts = []; let title = '', note = '';
+        for (let i = 0; i < Math.min(imgs.length, 12); i++) {
+          setProgress(tx('Lecture de la page {i} sur {n}…', { i: i + 1, n: Math.min(imgs.length, 12) }));
+          const d = await ai('ocr', { kind: 'images', images: [await imageToJpeg(imgs[i], 1700)], correct: ocrFix });
+          const t = String(d.lyrics || '').replace(/\\n/g, '\n').trim(); if (t) parts.push(t);
+          if (!title && d.title) title = d.title; if (d.note) note = d.note;
+        }
+        setOcr((prev) => (prev ? { ...prev, lyrics: [prev.lyrics.trim(), ...parts].filter(Boolean).join('\n\n'), pages: (prev.pages || 1) + parts.length } : { lyrics: parts.join('\n\n'), title, note, pages: parts.length }));
       }
     } catch (e) { say(e.message === 'docx' ? tx('Fichier Word illisible') : e.message); }
     setProgress(''); setBusy('');
   };
-  const useOcr = (append) => {
-    const text = append && song.lyrics.trim() && !isDemo(song.lyrics) ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
-    if (ocr.title && (!append || !song.lyrics.trim())) up((s) => (s.title = ocr.title));
-    analyze(text); setOcr(null); say(tx('Paroles importées'));
+  // garde la mélodie et les accords déjà faits quand on ajoute ou retire des parties
+  const freeze = (s) => s.blocks.forEach((b) => b.lines.forEach((l) => { if (l.notes) l.custom = true; }));
+  const useOcr = async (append) => {
+    const merge = append && song.lyrics.trim() && !isDemo(song.lyrics);
+    if (merge) { await snapshot(tx('Avant d’ajouter des pages'), 'named'); freeze(song); }
+    const text = merge ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
+    if (ocr.title && !merge) up((s) => (s.title = ocr.title));
+    analyze(text); setOcr(null); say(merge ? tx('Pages ajoutées à ta chanson — ton arrangement est gardé') : tx('Paroles importées'));
+  };
+  const blocksToText = (blocks) => blocks.map((b) => [b.label || TYPES[b.type] || 'Couplet', ...b.lines.map((l) => l.text)].join('\n')).join('\n\n');
+  const removeBlock = async (bi) => {
+    const b = song.blocks[bi]; if (!b) return;
+    if (!confirm(tx('Retirer la section « {n} » de ta chanson ? Une version est gardée pour revenir en arrière.', { n: M.localLabel(b.label) || tx(TYPES[b.type]) }))) return;
+    await snapshot(tx('Avant de retirer « {n} »', { n: M.localLabel(b.label) || tx(TYPES[b.type]) }), 'named');
+    freeze(song);
+    const text = blocksToText(song.blocks.filter((_, i) => i !== bi));
+    up((s) => { s.form = null; });
+    analyze(text); say(tx('Section retirée'));
   };
   const aiPolish = async () => {
     setBusy('polish');
@@ -1031,10 +1051,19 @@ export default function Page() {
             {ocr.title && <div className="hint">{tx('Titre')} : <b style={{ color: 'var(--txt)' }}>{ocr.title}</b></div>}
             <textarea value={ocr.lyrics} onChange={(e) => setOcr({ ...ocr, lyrics: e.target.value })} style={{ minHeight: 200 }} />
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn pri" onClick={() => useOcr(false)}><Ic n="check" /> {tx('Remplacer mes paroles')}</button>
-              <button className="btn" onClick={() => useOcr(true)}><Ic n="plus" /> {tx('Ajouter à la suite')}</button>
+              <span className="hint grow">{tx('{n} page(s) lue(s)', { n: ocr.pages || 1 })}</span>
+              <label className="btn sm"><Ic n="camera" /> {tx('Ajouter une page')}<input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
+              <label className="btn sm"><Ic n="file" /> {tx('Ajouter des fichiers')}<input type="file" accept="image/*,.pdf,.txt,.md,.docx" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
+            </div>
+            {busy === 'ocr' && <div className="row"><Magic kind="ocr" /> <span className="hint">{progress}</span></div>}
+            <div className="row" style={{ marginTop: 8 }}>
+              {song.lyrics.trim() && !isDemo(song.lyrics) ? <>
+                <button className="btn pri" onClick={() => useOcr(true)}><Ic n="plus" /> {tx('Ajouter à ma chanson (fusion)')}</button>
+                <button className="btn" onClick={() => { if (confirm(tx('Remplacer toutes tes paroles par ce texte ?'))) useOcr(false); }}>{tx('Remplacer mes paroles')}</button>
+              </> : <button className="btn pri" onClick={() => useOcr(false)}><Ic n="check" /> {tx('Utiliser ces paroles')}</button>}
               <button className="btn" onClick={() => setOcr(null)}>{tx('Annuler')}</button>
             </div>
+            {song.lyrics.trim() && <div className="hint">{tx('La fusion ajoute ces pages à la fin et garde ta mélodie, tes accords et ton arrangement. Tu peux ensuite réordonner dans Mélodie → Structure.')}</div>}
           </div>}
           <label className="f">{tx("Tes paroles")}</label>
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
@@ -1165,6 +1194,7 @@ export default function Page() {
               <button className={'sec-tag ' + b.type} onClick={() => up((s) => { const o = ['verse', 'chorus', 'bridge']; s.blocks[bi].type = o[(o.indexOf(b.type) + 1) % 3]; M.composeSong(s, s.variant); })}>{(() => { const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); return lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`; })()}</button>
               <button className="chip" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => up((s) => { const o = ['soft', 'emo', 'normal', 'loud']; s.blocks[bi].dyn = o[(o.indexOf(b.dyn || 'normal') + 1) % 4]; })}><Ic size={12} n={{ soft: 'feather', emo: 'drop', normal: 'music', loud: 'flame' }[b.dyn || 'normal']} /> {tx(M.DYN_LABEL[b.dyn || 'normal'])}</button>
               <span className="sp" style={{ flex: 1 }} />
+              <button className="mini" onClick={() => removeBlock(bi)} aria-label={tx('Retirer cette section')} title={tx('Retirer cette section')}><Ico n="trash" s={16} /></button>
               <button className="mini" onClick={() => { const L = tl.lines.filter((l) => l.bi === bi && !l.occ); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); }}><Ic n="play" size={15} fill="currentColor" /></button>
             </div>
             {b.lines.map((l, li) => {
