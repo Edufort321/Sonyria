@@ -1,4 +1,4 @@
-// Sonyra — route serveur : appelle l'API Anthropic avec la clé stockée dans Vercel (jamais exposée au navigateur)
+// Sonyria — route serveur : appelle l'API Anthropic avec la clé stockée dans Vercel (jamais exposée au navigateur)
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
@@ -12,6 +12,22 @@ function prompt(task, p) {
 Styles permis : ${STYLES.join(', ')}. Tonalité "key" : entier 0-11 (0=Do, 2=Ré, 4=Mi, 5=Fa, 7=Sol, 9=La, 11=Si). "mode" : "maj" ou "min". "bpm" : 60-170.
 Varie les styles et les tempos. Pour chaque ambiance, "why" = une courte phrase en français qui explique le lien avec le texte.
 Réponds UNIQUEMENT avec ce JSON : {"options":[{"style":"pop","mode":"maj","key":0,"bpm":104,"why":"..."}]}
+
+Paroles :
+${p.lyrics}`;
+  }
+  if (task === 'polish') {
+    return `Tu es parolier et correcteur. Voici des paroles de chanson écrites à la main (souvent sans ponctuation, avec des fautes).
+Ta mission :
+1. Corriger l'orthographe, les accords et la grammaire (français ${p.variety || 'québécois standard'}).
+2. Garder la voix, les images et le sens de l'auteur : change le moins possible.
+3. Quand une phrase ne se chante pas bien, ajuster la tournure (ordre des mots, mot plus court, rime plus juste) pour qu'elle « fitte » mieux sur la musique.
+4. Couper le texte en vers chantables de 6 à 12 syllabes, une phrase musicale par ligne ; les vers vont par paires qui riment quand c'est possible.
+5. Mettre chaque section sous un en-tête entre crochets : [Couplet 1], [Refrain], [Pont], [Fin]… et GARDER les indications de l'auteur entre parenthèses dans l'en-tête, ex. [Refrain (plus puissant)], [Pont (tout doucement)].
+6. Retirer les répétitions accidentelles, mais garder les répétitions voulues (refrain).
+Réponds UNIQUEMENT avec ce JSON :
+{"lyrics":"texte complet corrigé avec \\n entre les lignes et une ligne vide entre les sections","changes":[{"avant":"...","apres":"...","pourquoi":"courte raison"}],"note":"une phrase en français"}
+Limite "changes" aux 12 ajustements de tournure les plus importants (pas les simples fautes d'orthographe).
 
 Paroles :
 ${p.lyrics}`;
@@ -61,7 +77,7 @@ function extractJson(text) {
 export async function POST(req) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return Response.json({ error: 'Clé ANTHROPIC_API_KEY absente dans Vercel.' }, { status: 503 });
-  const code = process.env.SONYRA_ACCESS_CODE;
+  const code = process.env.SONYRIA_ACCESS_CODE;
   if (code && req.headers.get('x-access-code') !== code) return Response.json({ error: 'Code d’accès requis (Réglages).' }, { status: 401 });
   let body;
   try { body = await req.json(); } catch { return Response.json({ error: 'Requête invalide' }, { status: 400 }); }
@@ -74,7 +90,7 @@ export async function POST(req) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' || task === 'polish' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
     });
     const j = await r.json();
     if (!r.ok) return Response.json({ error: j?.error?.message || 'Erreur Anthropic' }, { status: r.status });
@@ -86,5 +102,5 @@ export async function POST(req) {
 }
 
 export async function GET() {
-  return Response.json({ ok: true, ai: !!process.env.ANTHROPIC_API_KEY, locked: !!process.env.SONYRA_ACCESS_CODE });
+  return Response.json({ ok: true, ai: !!process.env.ANTHROPIC_API_KEY, locked: !!process.env.SONYRIA_ACCESS_CODE });
 }

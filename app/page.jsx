@@ -76,6 +76,7 @@ export default function Page() {
   const [aiVibe, setAiVibe] = useState(false);
   const [exporting, setExporting] = useState('');
   const [micOn, setMicOn] = useState(false);
+  const [polish, setPolish] = useState(null);
   const [recFrom, setRecFrom] = useState(0);
   const eng = useRef(null);
   const recInfo = useRef(null);
@@ -92,7 +93,7 @@ export default function Page() {
   const save = () => {
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      try { await DB.saveSong({ id: song.id, title: song.title, updated: Date.now(), song: serialize(song) }); localStorage.setItem('sonyra-current', song.id); } catch (e) {}
+      try { await DB.saveSong({ id: song.id, title: song.title, updated: Date.now(), song: serialize(song) }); localStorage.setItem('sonyria-current', song.id); } catch (e) {}
     }, 1000);
   };
   const up = (fn) => {
@@ -121,8 +122,8 @@ export default function Page() {
   useEffect(() => {
     (async () => {
       try {
-        const id = localStorage.getItem('sonyra-current');
-        setCode(localStorage.getItem('sonyra-code') || '');
+        const id = localStorage.getItem('sonyria-current');
+        setCode(localStorage.getItem('sonyria-code') || '');
         if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
       } catch (e) {}
     })();
@@ -207,6 +208,15 @@ export default function Page() {
     } catch (e) { say(e.message); }
     setBusy('');
   };
+  const aiPolish = async () => {
+    setBusy('polish');
+    try {
+      const d = await ai('polish', { lyrics: song.lyrics });
+      if (!d.lyrics || d.lyrics.length < 10) throw new Error('Réponse vide');
+      setPolish({ lyrics: String(d.lyrics).replace(/\\n/g, '\n'), changes: (d.changes || []).slice(0, 12), note: d.note || '' });
+    } catch (e) { say(e.message); }
+    setBusy('');
+  };
   const aiCompose = async () => {
     setBusy('compose');
     try {
@@ -260,7 +270,7 @@ export default function Page() {
   // ---------- enregistrement ----------
   const openMic = async () => {
     const e = await ensureAudio();
-    try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say('Micro refusé : autorise le micro pour Sonyra dans le navigateur.'); return null; }
+    try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say('Micro refusé : autorise le micro pour Sonyria dans le navigateur.'); return null; }
   };
   const startRec = async () => {
     const e = await openMic(); if (!e) return;
@@ -361,7 +371,7 @@ export default function Page() {
   };
 
   // ---------- export ----------
-  const slug = () => (song.title || 'sonyra').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sonyra';
+  const slug = () => (song.title || 'sonyria').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sonyria';
   const saveBlob = (blob, name) => {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
@@ -450,8 +460,8 @@ export default function Page() {
   return (
     <div className="app">
       <header className="hdr">
-        <img src="/logo.png" alt="Sonyra" />
-        <div className="brand">Sonyra<small>Studio de chansons</small></div>
+        <img src="/logo.png" alt="Sonyria" />
+        <div className="brand">Sonyria<small>Studio de chansons</small></div>
         <div className="sp" />
         {install && <button className="install" onClick={async () => { install.prompt(); await install.userChoice; setInstall(null); }}>Installer</button>}
         <button className="icon-btn" onClick={() => setSheet({ type: 'songs' })} title="Mes chansons">📂</button>
@@ -471,7 +481,21 @@ export default function Page() {
           </div>
           <label className="f">Tes paroles</label>
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder="Colle ton texte ici…" />
-          <div className="hint">Astuce : écris <b>[Refrain]</b>, <b>[Couplet]</b> ou <b>[Pont]</b> au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Pour forcer un découpage de syllabe : <b>chan/tent</b>.</div>
+          <div className="hint">Astuce : écris <b>[Refrain]</b>, <b>[Couplet]</b> ou <b>[Pont]</b> au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête : <b>[Pont (tout doucement)]</b>, <b>[Refrain (plus puissant)]</b>, <b>(très émouvant)</b>. Pour forcer un découpage de syllabe : <b>chan/tent</b>.</div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <><span className="busy" /> Correction…</> : '✍️ Corriger et adapter avec Claude'}</button>
+            {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}>↺ Revenir à mon original</button>}
+          </div>
+          {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
+            <h3>✍️ Version corrigée</h3>
+            {polish.note && <div className="hint">{polish.note}</div>}
+            {polish.changes.length > 0 && <div style={{ margin: '8px 0' }}>{polish.changes.map((c, i) => <div key={i} className="hint" style={{ marginBottom: 6 }}><s>{c.avant}</s><br /><b style={{ color: 'var(--txt)' }}>→ {c.apres}</b> <i>({c.pourquoi})</i></div>)}</div>}
+            <textarea value={polish.lyrics} onChange={(e) => setPolish({ ...polish, lyrics: e.target.value })} style={{ minHeight: 180 }} />
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn pri" onClick={() => { const orig = song.lyricsOriginal || song.lyrics; up((s) => (s.lyricsOriginal = orig)); analyze(polish.lyrics); setPolish(null); say('Nouvelle version appliquée — ton original est gardé'); }}>✔ Utiliser cette version</button>
+              <button className="btn" onClick={() => setPolish(null)}>Garder la mienne</button>
+            </div>
+          </div>}
           <div className="hint" style={{ marginTop: 6 }}>{flat(song).length} lignes · {flat(song).reduce((a, x) => a + x.l.syls.length, 0)} syllabes · {song.blocks.length} sections</div>
         </div>
 
@@ -542,6 +566,7 @@ export default function Page() {
           <div key={bi}>
             <div className="sec-h">
               <button className={'sec-tag ' + b.type} onClick={() => up((s) => { const o = ['verse', 'chorus', 'bridge']; s.blocks[bi].type = o[(o.indexOf(b.type) + 1) % 3]; M.composeSong(s, s.variant); })}>{b.label.toLowerCase().startsWith(TYPES[b.type].toLowerCase()) ? b.label : `${b.label} · ${TYPES[b.type]}`}</button>
+              <button className="chip" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => up((s) => { const o = ['soft', 'emo', 'normal', 'loud']; s.blocks[bi].dyn = o[(o.indexOf(b.dyn || 'normal') + 1) % 4]; })}>{{ soft: '🕯️', emo: '💧', normal: '🎵', loud: '🔥' }[b.dyn || 'normal']} {M.DYN_LABEL[b.dyn || 'normal']}</button>
               <span className="sp" style={{ flex: 1 }} />
               <button className="mini" onClick={() => { const L = tl.lines.filter((l) => l.bi === bi); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); }}>▶</button>
             </div>
@@ -713,7 +738,7 @@ export default function Page() {
             <button className="btn" onClick={() => exportLive(false)}>🎵 Audio MP4</button>
             <button className="btn" onClick={exportWav}>💿 WAV studio</button>
           </div>}
-          <div className="hint" style={{ marginTop: 8 }}>Le clip et l’audio MP4 s’enregistrent en temps réel, pendant la durée de la chanson. Le WAV est instantané. Les sons de Sonyra sont générés par l’app, donc libres de droits.</div>
+          <div className="hint" style={{ marginTop: 8 }}>Le clip et l’audio MP4 s’enregistrent en temps réel, pendant la durée de la chanson. Le WAV est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.</div>
         </div>
       </>}
 
@@ -761,7 +786,7 @@ export default function Page() {
         {sheet.type === 'settings' && <>
           <h3>⚙️ Réglages</h3>
           <div className="hint">IA : {aiStatus == null ? '…' : aiStatus.ai ? '✅ Clé Anthropic détectée' : '❌ Aucune clé (ajoute ANTHROPIC_API_KEY dans Vercel)'}</div>
-          {aiStatus?.locked && <><label className="f">Code d’accès IA</label><input type="text" value={code} onChange={(e) => { setCode(e.target.value); localStorage.setItem('sonyra-code', e.target.value); }} placeholder="Code défini dans Vercel" /></>}
+          {aiStatus?.locked && <><label className="f">Code d’accès IA</label><input type="text" value={code} onChange={(e) => { setCode(e.target.value); localStorage.setItem('sonyria-code', e.target.value); }} placeholder="Code défini dans Vercel" /></>}
           <label className="f">Notation</label>
           <div className="chips"><button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button><button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>Do Ré Mi</button></div>
           <label className="f">Installer l’app</label>

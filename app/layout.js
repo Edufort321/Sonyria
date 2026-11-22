@@ -1,11 +1,11 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Sonyra — Studio de chansons',
+  title: 'Sonyria — Studio de chansons',
   description: 'Colle tes paroles : mélodies, accords, beats, enregistrement, karaoké et vidéoclips.',
   manifest: '/manifest.webmanifest',
   icons: { icon: '/icon-192.png', apple: '/apple-touch-icon.png' },
-  appleWebApp: { capable: true, title: 'Sonyra', statusBarStyle: 'black-translucent' },
+  appleWebApp: { capable: true, title: 'Sonyria', statusBarStyle: 'black-translucent' },
 };
 export const viewport = { themeColor: '#05040b', width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 

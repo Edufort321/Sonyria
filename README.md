@@ -1,4 +1,4 @@
-# Sonyra — Studio de chansons
+# Sonyria — Studio de chansons
 
 Colle tes paroles → ambiances (style, tempo, tonalité) → mélodies et accords → beat → enregistre ta voix → mixe → karaoké → vidéoclip MP4.
 
@@ -14,7 +14,7 @@ Colle tes paroles → ambiances (style, tempo, tonalité) → mélodies et accor
 |---|---|---|
 | `ANTHROPIC_API_KEY` | oui (pour l'IA) | Clé de l'API Anthropic, jamais envoyée au navigateur |
 | `ANTHROPIC_MODEL` | non | Modèle (par défaut `claude-sonnet-5-5`) |
-| `SONYRA_ACCESS_CODE` | non | Code à entrer dans ⚙️ Réglages pour pouvoir utiliser l'IA (protège ta clé) |
+| `SONYRIA_ACCESS_CODE` | non | Code à entrer dans ⚙️ Réglages pour pouvoir utiliser l'IA (protège ta clé) |
 
 ## Développement
 
