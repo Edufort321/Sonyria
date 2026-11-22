@@ -1836,17 +1836,22 @@ function Structure({ song, up, tl, play, clock }) {
   const move = (i, d) => { const f = [...form]; const j = i + d; if (j < 0 || j >= f.length) return; [f[i], f[j]] = [f[j], f[i]]; setForm(f); };
   const secs = tl.bars.length * 16 * s16(song.bpm);
   const curFi = clock?.active ? tl.lines[clock.active.line]?.fi : -1;
-  const name = (bi) => { const b = song.blocks[bi]; const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); return lab ? (lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`) : ty; };
+  const name = (item) => { const bi = M.formBi(item), b = song.blocks[bi]; if (!b) return '?'; const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); const base = lab ? (lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`) : ty; return M.formInst(item) ? `♪ ${tx('Solo instrumental')} (${base})` : base; };
   const playFi = (fi) => { const L = tl.lines.filter((l) => l.fi === fi); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); };
   return (
     <div className="card struct">
       <h3><Ico n="measure" s={28} /> {tx("Structure de la chanson")}<span className="sp" />
         <button className={'btn sm' + (auto ? ' pri' : '')} onClick={() => setForm(null)} title={tx('Retour automatique au refrain après chaque couplet')}><Ic n="loop" /> Auto</button>
       </h3>
+      <div className="chips" style={{ marginBottom: 8 }}>
+        <span className="hint" style={{ alignSelf: 'center' }}>{tx('Longueur')} :</span>
+        {[['', 'Mes paroles'], ['moyen', 'Complète (solo + double refrain)'], ['long', 'Longue (+ interlude et outro)']].map(([k, n]) => <button key={k} className={'chip' + ((song.length || '') === k && auto ? ' on' : '')} onClick={() => up((s) => { s.length = k; s.form = null; })}>{tx(n)}</button>)}
+        <button className={'chip' + (song.fills !== false ? ' on' : '')} onClick={() => up((s) => (s.fills = s.fills === false))}>{tx('Roulements entre sections')}</button>
+      </div>
       <div className="hint" style={{ marginBottom: 8 }}>{tx('La chanson complète, dans l’ordre joué : {n} sections · ≈ {d}. Le refrain revient après chaque couplet; déplace, ajoute ou enlève des sections.', { n: form.length, d: `${Math.floor(secs / 60)} min ${String(Math.round(secs % 60)).padStart(2, '0')} s` })}</div>
       <div className="struct-list">
         {form.map((bi, i) => (
-          <div key={i} className={'struct-row ' + (song.blocks[bi]?.type || '') + (curFi === i ? ' live' : '')}>
+          <div key={i} className={'struct-row ' + (song.blocks[M.formBi(bi)]?.type || '') + (M.formInst(bi) ? ' inst' : '') + (curFi === i ? ' live' : '')}>
             <span className="struct-n">{i + 1}</span>
             <button className="grow struct-name" onClick={() => playFi(i)}><Ic n="play" size={13} fill="currentColor" /> {name(bi)}</button>
             <button className="mini" onClick={() => move(i, -1)} disabled={!i} aria-label={tx('Monter')}>↑</button>
@@ -1858,6 +1863,7 @@ function Structure({ song, up, tl, play, clock }) {
       {!adding ? <button className="btn wide" style={{ marginTop: 8 }} onClick={() => setAdding(true)}><Ic n="plus" /> {tx('Ajouter une section')}</button> : (
         <div className="chips" style={{ marginTop: 8 }}>
           {song.blocks.map((b, bi) => <button key={bi} className="chip" onClick={() => { setForm([...form, bi]); setAdding(false); }}>{name(bi)}</button>)}
+          {song.blocks.map((b, bi) => b.type === 'chorus' && <button key={'i' + bi} className="chip" onClick={() => { setForm([...form, 'i:' + bi]); setAdding(false); }}>{name('i:' + bi)}</button>)}
           <button className="chip" onClick={() => setAdding(false)}>×</button>
         </div>
       )}
