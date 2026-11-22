@@ -13,6 +13,7 @@ import { renderScore, chordSheet } from '@/lib/score';
 import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
+import { makeBacking, BACKS } from '@/lib/backing';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
@@ -476,6 +477,21 @@ export default function Page() {
         song.tracks.forEach((t) => { if (!t.buffer && t.data) t.buffer = storeToBuffer(e.ctx, { sr: t.sr, ch: [t.data] }); });
       } catch (err) {}
     }
+  };
+  const addBacking = async (t, kind) => {
+    if (!t.data) return;
+    setBusy('back'); await new Promise((r) => setTimeout(r, 40));
+    try {
+      const e = await ensureAudio();
+      const outs = makeBacking(t.data, t.sr, kind, song.key, song.mode), pans = BACKS[kind].pan;
+      up((s) => outs.forEach((d, i) => {
+        mkTrack(s, `${tx('Back')} · ${tx(BACKS[kind].n)}${outs.length > 1 ? ' ' + (i + 1) : ''}`, d, t.sr, t.start, false, 'stade');
+        Object.assign(s.tracks[s.tracks.length - 1], { pan: pans[i] ?? 0, vol: kind === 'double' ? 0.45 : 0.38, echo: 0.28, fb: 0.35, reverb: 0.5, back: true });
+      }));
+      song.tracks.forEach((x) => { if (!x.buffer && x.data) x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
+      say(tx('Back vocal ajouté — ajuste son volume et son écho'));
+    } catch (err) { say(tx('Back vocal impossible')); }
+    setBusy('');
   };
   const mkTrack = (s, name, data, sr, start, mute, fx = 'naturel') => s.tracks.push({ id: 't' + Date.now() + Math.random().toString(36).slice(2, 6), name, start, buffer: null, data, sr, vol: 0.9, pan: 0, fx, ...fxParams(fx), mute, solo: false });
   // Importe un MP4/audio et recrée la chanson : paroles, tempo, tonalité, accords, mélodie, karaoké
@@ -1104,6 +1120,13 @@ export default function Page() {
               <button className="tgl" aria-label={tx("Supprimer")} onClick={() => { if (confirmDel.current === t.id) up((s) => (s.tracks = s.tracks.filter((x) => x.id !== t.id))); else { confirmDel.current = t.id; say(tx('Touche encore la corbeille pour supprimer')); } }}><Ico n="trash" s={22} /></button>
             </div>
             <Wave track={t} />
+            {!t.back ? <div className="backs">
+              <b><Ico n="voice-wave" s={18} /> {tx('Back vocals à partir de cette voix')}</b>
+              <div className="chips">{Object.entries(BACKS).map(([k, b]) => <button key={k} className="chip" disabled={busy === 'back'} onClick={() => addBacking(t, k)}>{tx(b.n)}</button>)}
+                <button className="chip" onClick={() => tr(t.id, (x) => Object.assign(x, fxParams('stade'), { fx: 'stade', back: true, pan: song.tracks.filter((y) => y.back).length % 2 ? 0.5 : -0.5, vol: 0.5, echo: 0.3, reverb: 0.5 }))}>{tx('C’est un back vocal')}</button>
+              </div>
+              {busy === 'back' && <div className="row"><span className="busy" /> {tx('Sonyria crée tes back vocals…')}</div>}
+            </div> : <div className="hint"><span className="badge">{tx('Back vocal')}</span> {tx('En arrière-plan, avec écho et réverb — dose-le avec le volume.')}</div>}
             <div className="hint">{tx('Début : {s} s · {d} s', { s: t.start.toFixed(2), d: (t.data?.length / t.sr || 0).toFixed(1) })}</div>
             <div className="chips" style={{ margin: '8px 0' }}>
               {Object.entries(VOICE_FX).map(([k, f]) => <button key={k} className={'chip' + (t.fx === k ? ' on' : '')} onClick={() => tr(t.id, (x) => Object.assign(x, fxParams(k), { fx: k }))}>{tx(f.n)}</button>)}

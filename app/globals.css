@@ -533,3 +533,5 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
   .card > h3 .btn.sm { padding: 6px 9px; font-size: 12px; }
 }
 .toast { bottom: calc(100px + var(--safe-b)); }
+.backs { margin: 8px 0; padding: 8px 10px; border-radius: 12px; background: rgba(236,72,153,.07); border: 1px solid rgba(236,72,153,.3); }
+.backs b { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 6px; }
