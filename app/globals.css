@@ -333,3 +333,16 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .welcome .wwrap { padding: 16px 16px 0; }
 .whero { padding-top: 2vh; }
 .wlogo { display: block; margin: 0 auto; }
+/* fredonner / chanter */
+.hum-card { background: linear-gradient(var(--panel), var(--panel)) padding-box, var(--grad) border-box; border: 1.5px solid transparent; }
+.seg2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.seg2 button { text-align: left; padding: 12px; border-radius: 14px; background: var(--panel2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.seg2 button b { font-size: 14px; }
+.seg2 button small { font-size: 11.5px; color: var(--dim); line-height: 1.35; }
+.seg2 button.on { border-color: var(--orange); box-shadow: 0 0 14px rgba(251, 146, 60, 0.35); background: rgba(251, 146, 60, 0.08); }
+.humbeat { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 10px; }
+.humbeat .cnt { font: 800 54px/1 Sora, sans-serif; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.humbeat .dots { display: flex; gap: 12px; height: 54px; align-items: center; }
+.humbeat .dots i { width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.12); }
+.humbeat .dots i.on { background: var(--orange); box-shadow: 0 0 14px var(--orange); }
+.humbeat .meter { width: 100%; }

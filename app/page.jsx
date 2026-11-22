@@ -4,7 +4,8 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime } from '@/lib/engine';
 import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
-import { separate, analyzeMusic, transcribe, buildSong } from '@/lib/analyze';
+import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
+import * as H from '@/lib/hum';
 import * as DB from '@/lib/storage';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
@@ -90,6 +91,9 @@ export default function Page() {
   const [install, setInstall] = useState(null);
   const [installUI, setInstallUI] = useState(null);
   const [compact, setCompact] = useState(false);
+  const [hum, setHum] = useState({ mode: 'hum', metro: true, onLyrics: true, keepKey: false, instr: 'piano' });
+  const [humRec, setHumRec] = useState(false);
+  const humInfo = useRef(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
   const [exporting, setExporting] = useState('');
@@ -371,6 +375,57 @@ export default function Page() {
       setTab('melodie');
       say(tx('Chanson recréée : {b} BPM, {k}, {n} phrases. Vérifie les paroles !', { b: A.bpm, k: `${(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[A.key]} ${tx(A.mode === 'maj' ? 'majeur' : 'mineur')}`, n: segs.length }));
     } catch (err) { say(tx('Import impossible : ') + (err.message || err)); }
+    setProgress(''); setBusy('');
+  };
+  // ---------- fredonner / chanter : Sonyria transcrit et ajoute la musique ----------
+  const hasLyrics = () => song.blocks.some((b) => b.lines.some((l) => l.syls.length && !/^(la ?)+$/i.test(l.text.trim())));
+  const startHum = async () => {
+    const e = await openMic(); if (!e) return;
+    const T1 = e.startClick(song.bpm, 1, hum.metro);
+    e.startRecording();
+    humInfo.current = { T1, bpm: song.bpm, metro: hum.metro, mode: hum.mode };
+    setHumRec(true);
+  };
+  const stopHum = async () => {
+    const e = eng.current; if (!e) return;
+    const r = e.stopRecording(); e.stopClick(); setHumRec(false);
+    if (!r) return;
+    const info = humInfo.current;
+    setBusy('hum');
+    try {
+      const data = r.buffer.getChannelData(0), sr = r.buffer.sampleRate;
+      const lat = (song.latency ?? Math.round(e.latency() * 1000)) / 1000;
+      setProgress(tx('Analyse de ta voix : hauteur des notes…')); await new Promise((q) => setTimeout(q, 30));
+      let bpm = info.bpm;
+      if (!info.metro) bpm = M.detectBpm(data, sr) || info.bpm;
+      const sing = info.mode === 'sing';
+      let notes = H.framesToNotes(H.pitchTrack(data, sr), sing ? M.detectOnsets(data, sr).onsets.map((o) => o.t) : []);
+      notes = H.cleanNotes(notes, { merge: !sing });
+      if (info.metro) notes = notes.filter((n) => n.t + n.dur > info.T1 + lat - r.ctxStart); // ignorer le décompte
+      if (notes.length < 2) throw new Error(tx('Aucune note détectée : rapproche-toi du micro et réessaie.'));
+      const barDur = 240 / bpm;
+      const t0 = info.metro ? info.T1 + lat - r.ctxStart : notes[0].t;
+      const K = hum.keepKey ? { key: song.key, mode: song.mode } : H.keyFromNotes(notes);
+      let text = null;
+      if (sing && !hasLyrics()) {
+        const segs = await transcribe(data, sr, setProgress);
+        if (segs.length) text = segsToLyrics(segs, barDur);
+      }
+      setProgress(tx('Harmonisation et arrangement…')); await new Promise((q) => setTimeout(q, 30));
+      const useLyrics = sing ? (text || hasLyrics()) : hum.onLyrics && hasLyrics();
+      up((s) => {
+        if (text) { s.lyrics = text; s.blocks = M.parseLyrics(text); }
+        H.buildFromNotes(s, notes, { bpm, t0, introBars: 1, key: K.key, mode: K.mode, lyricsBlocks: useLyrics ? s.blocks : null });
+        const start = barDur - t0;
+        const name = sing ? tx('Voix chantée') : tx('Fredonnement');
+        s.tracks.push({ id: 't' + Date.now(), name, start, buffer: r.buffer, data, sr, vol: 0.9, pan: 0, fx: sing ? 'studio' : 'naturel', ...fxParams(sing ? 'studio' : 'naturel'), mute: !sing, solo: false });
+        if (sing) { s.mix.mute = { ...s.mix.mute, lead: true, harm: false, chords: false, bass: false, drums: false }; }
+        else { s.leadSound = hum.instr; s.mix.mute = { ...s.mix.mute, lead: false, chords: false, bass: false, drums: false }; }
+      });
+      say(sing ? tx('Ta voix est arrangée : accords, basse et batterie ajoutés') : tx('Mélodie reproduite : {n} notes en {k}', { n: notes.length, k: `${(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[K.key]} ${tx(K.mode === 'maj' ? 'majeur' : 'mineur')}` }));
+      setTab('melodie');
+      setTimeout(() => play({ from: 0 }), 300);
+    } catch (err) { say(err.message || String(err)); }
     setProgress(''); setBusy('');
   };
   const detectTempo = (t) => { const b = M.detectBpm(t.data, t.sr); if (b) { up((s) => (s.bpm = b)); say(tx('Tempo détecté : {n} BPM', { n: b })); } else say(tx('Tempo introuvable')); };
@@ -757,6 +812,25 @@ export default function Page() {
 
       {/* ================= STUDIO ================= */}
       {tab === 'studio' && <>
+        <div className="card hum-card">
+          <h3><Ico n="voice-wave" s={30} /> {tx('Fredonne ou chante : Sonyria ajoute la musique')}</h3>
+          <div className="seg2">
+            <button className={hum.mode === 'hum' ? 'on' : ''} onClick={() => setHum({ ...hum, mode: 'hum' })}><Ico n="note" s={24} /><b>{tx('Fredonner une mélodie')}</b><small>{tx('Hum, la-la-la, sifflé : l’app transcrit tes notes et les rejoue.')}</small></button>
+            <button className={hum.mode === 'sing' ? 'on' : ''} onClick={() => setHum({ ...hum, mode: 'sing' })}><Ico n="microphone" s={24} /><b>{tx('Chanter')}</b><small>{tx('Ta voix reste ; accords, basse et batterie s’ajoutent autour.')}</small></button>
+          </div>
+          <div className="chips" style={{ marginTop: 10 }}>
+            <button className={'chip' + (hum.metro ? ' on' : '')} onClick={() => setHum({ ...hum, metro: !hum.metro })}><Ic n="bell" size={14} /> {tx('Métronome')} {song.bpm} BPM</button>
+            <button className={'chip' + (hum.keepKey ? ' on' : '')} onClick={() => setHum({ ...hum, keepKey: !hum.keepKey })}><Ic n="score" size={14} /> {tx('Garder ma tonalité')}</button>
+            {hum.mode === 'hum' && hasLyrics() && <button className={'chip' + (hum.onLyrics ? ' on' : '')} onClick={() => setHum({ ...hum, onLyrics: !hum.onLyrics })}><Ic n="pen" size={14} /> {tx('Poser sur mes paroles')}</button>}
+          </div>
+          {hum.mode === 'hum' && <><label className="f">{tx('Instrument qui rejoue ta mélodie')}</label>
+            <div className="chips">{[['piano', 'Piano', 'piano'], ['flute', 'Flûte', 'flute'], ['synth', 'Synthé', 'synth'], ['voix', 'Voix', 'mic']].map(([k, n, ic]) => <button key={k} className={'chip' + (hum.instr === k ? ' on' : '')} onClick={() => setHum({ ...hum, instr: k })}><Ico n={ic} s={20} /> {tx(n)}</button>)}</div></>}
+          <div style={{ height: 12 }} />
+          {busy === 'hum' ? <div className="row"><span className="busy" /> {progress}</div>
+            : !humRec ? <button className="btn rec wide" onClick={startHum}><Ico n="record" s={26} /> {hum.mode === 'hum' ? tx('Fredonner maintenant') : tx('Chanter maintenant')}</button>
+            : <><HumBeat eng={eng} /><button className="btn wide" onClick={stopHum}><span className="rec-dot" /> {tx('Terminer et ajouter la musique')}</button></>}
+          <div className="hint" style={{ marginTop: 8 }}>{hum.mode === 'hum' ? tx('Après le décompte de 4 temps, fredonne au tempo. Choisis d’abord le style dans Paroles ou Beat : l’arrangement suit ce style.') : hasLyrics() ? tx('Chante tes paroles au tempo après le décompte. Le karaoké se cale sur ta voix.') : tx('Pas de paroles tapées : elles seront transcrites depuis ta voix (Whisper).')}</div>
+        </div>
         <div className="card">
           <h3><Ico n="studio-mic" s={30} /> {tx("Enregistrement")}</h3>
           {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Activer le micro")}</button> : <MicMeter eng={eng} />}
@@ -989,6 +1063,29 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+function HumBeat({ eng }) {
+  const [st, setSt] = useState({ beat: -1, count: null, lv: 0 });
+  useEffect(() => {
+    let raf; const d = new Uint8Array(512);
+    const f = () => {
+      const e = eng.current; const cp = e?.clickPos;
+      if (e && cp) {
+        const dt = e.ctx.currentTime - cp.T1;
+        let lv = 0; const a = e.micAnalyser; if (a) { a.getByteTimeDomainData(d); for (let i = 0; i < d.length; i++) lv = Math.max(lv, Math.abs(d[i] - 128)); }
+        setSt({ beat: dt >= 0 ? Math.floor(dt / cp.beat) % 4 : -1, count: dt < 0 ? Math.ceil(-dt / cp.beat) : null, lv: lv / 128 });
+      }
+      raf = requestAnimationFrame(f);
+    };
+    f(); return () => cancelAnimationFrame(raf);
+  }, [eng]);
+  return (
+    <div className="humbeat">
+      {st.count ? <div className="cnt">{st.count}</div> : <div className="dots">{[0, 1, 2, 3].map((i) => <i key={i} className={st.beat === i ? 'on' : ''} />)}</div>}
+      <div className="meter"><i style={{ width: Math.min(100, st.lv * 140) + '%' }} /></div>
+    </div>
+  );
 }
 
 function MicMeter({ eng }) {
