@@ -14,6 +14,7 @@ import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
 import { makeBacking, BACKS } from '@/lib/backing';
+import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/lib/cover';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
@@ -119,6 +120,10 @@ export default function Page() {
   const [ocrFix, setOcrFix] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [fs, setFs] = useState(null);
+  const [coverV, setCoverV] = useState(0);
+  const coverUrl = useMemo(() => (typeof window === 'undefined' ? '' : loadCover(song.album || '')), [song.album, coverV, v]); // eslint-disable-line
+  const coverImg = useRef(null);
+  useEffect(() => { if (!coverUrl) { coverImg.current = null; return; } const im = new Image(); im.onload = () => { coverImg.current = im; }; im.src = coverUrl; }, [coverUrl]);
   const [cam, setCam] = useState(false);
   const [themeCat, setThemeCat] = useState(null);
   const [folds, setFolds] = useState({});
@@ -694,6 +699,63 @@ export default function Page() {
     exportStop.current = () => { e.stop(); setPlaying(false); mr.state !== 'inactive' && mr.stop(); };
   };
   const exportStop = useRef(null);
+  // album complet en MP4 : toutes les chansons à la suite, pochette, titre de la piste et progression
+  const exportAlbum = async (albumName) => {
+    const e = await ensureAudio();
+    const mime = pickMime(true);
+    if (mime === null) return say(tx('Ton navigateur ne permet pas l’export vidéo. Essaie Chrome.'));
+    const DEF = tx('Mon album'), key = albumName === DEF ? '' : albumName;
+    const items = (await DB.listSongs()).filter((x) => (x.album || '') === key).sort((a, b) => a.updated - b.updated);
+    if (!items.length) return say(tx('Cet album est vide pour l’instant.'));
+    setTab('clip'); setExporting('album');
+    const parts = [];
+    for (let i = 0; i < items.length; i++) {
+      setProgress(tx('Préparation de la chanson {i} sur {n}…', { i: i + 1, n: items.length }));
+      const r = await DB.getSong(items[i].id); if (!r) continue;
+      const d = newSong(''); const s = { ...d, ...r.song, mix: { ...d.mix, ...r.song.mix } }; ensureLayers(s);
+      (s.tracks || []).forEach((t) => { if (t.data) t.buffer = storeToBuffer(e.ctx, { sr: t.sr, ch: [t.data] }); });
+      try { await prepareSamples(e.ctx, s); parts.push({ title: s.title, buf: await renderOffline(s) }); } catch (err) {}
+    }
+    setProgress('');
+    if (!parts.length) { setExporting(''); return; }
+    const [W, H] = FORMATS[song.clip.format] || [1080, 1920];
+    const cv = clipRef.current; cv.width = W; cv.height = H; const g = cv.getContext('2d');
+    const cimg = await new Promise((res) => { const u = loadCover(key); if (!u) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = u; });
+    const total = parts.reduce((a, p) => a + p.buf.duration + 1, 0);
+    const as = e.streamDest().stream;
+    const stream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...as.getAudioTracks()]);
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 6_000_000, audioBitsPerSecond: 192_000 } : {});
+    const chunks = []; mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+    const t0 = e.ctx.currentTime + 0.3; let at = t0; const srcs = [];
+    parts.forEach((p) => { const sN = e.ctx.createBufferSource(); sN.buffer = p.buf; sN.connect(e.out); sN.start(at); srcs.push(sN); p.at = at - t0; at += p.buf.duration + 1; });
+    let raf, done = false;
+    const draw = () => {
+      const el = e.ctx.currentTime - t0; let i = parts.findIndex((p) => el < p.at + p.buf.duration + 1); if (i < 0) i = parts.length - 1;
+      g.fillStyle = '#05040b'; g.fillRect(0, 0, W, H);
+      if (cimg) { g.save(); g.filter = 'blur(40px) brightness(.45)'; const sc = Math.max(W, H) / cimg.width * 1.2; g.drawImage(cimg, (W - cimg.width * sc) / 2, (H - cimg.height * sc) / 2, cimg.width * sc, cimg.height * sc); g.restore(); }
+      const S = Math.min(W, H) * 0.62, x = (W - S) / 2, y = H * 0.42 - S / 2;
+      if (cimg) { g.save(); g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 50; g.drawImage(cimg, x, y, S, S); g.restore(); }
+      else { const gr = g.createLinearGradient(x, y, x + S, y + S); gr.addColorStop(0, '#22d3ee'); gr.addColorStop(0.5, '#a855f7'); gr.addColorStop(1, '#fb923c'); g.fillStyle = gr; g.fillRect(x, y, S, S); }
+      g.textAlign = 'center'; g.fillStyle = '#fff'; g.font = `800 ${Math.round(Math.min(W, H) * 0.06)}px Sora, sans-serif`;
+      g.fillText(parts[i].title || '', W / 2, y + S + Math.min(W, H) * 0.12);
+      g.font = `500 ${Math.round(Math.min(W, H) * 0.032)}px Sora, sans-serif`; g.fillStyle = 'rgba(255,255,255,.7)';
+      g.fillText(`${albumName} · ${tx('Piste {i} sur {n}', { i: i + 1, n: parts.length })}${me?.artist || me?.name ? ' · ' + (me.artist || me.name) : ''}`, W / 2, y + S + Math.min(W, H) * 0.18);
+      const p = parts[i], pr = Math.max(0, Math.min(1, (el - p.at) / p.buf.duration)), bw = W * 0.7, by = y + S + Math.min(W, H) * 0.24;
+      g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect((W - bw) / 2, by, bw, 8); const gr2 = g.createLinearGradient((W - bw) / 2, 0, (W + bw) / 2, 0); gr2.addColorStop(0, '#22d3ee'); gr2.addColorStop(1, '#a855f7'); g.fillStyle = gr2; g.fillRect((W - bw) / 2, by, bw * pr, 8);
+      g.font = `600 ${Math.round(W * 0.022)}px Sora, sans-serif`; g.textAlign = 'right'; g.fillStyle = 'rgba(255,255,255,.35)'; g.fillText('Sonyria', W - 20, H - 20);
+      if (!done) raf = requestAnimationFrame(draw);
+    };
+    const finish = () => { if (done) return; done = true; cancelAnimationFrame(raf); srcs.forEach((x) => { try { x.stop(); } catch (er) {} }); if (mr.state !== 'inactive') mr.stop(); };
+    mr.onstop = () => {
+      const type = mr.mimeType || mime || 'video/webm', ext = type.includes('mp4') ? 'mp4' : 'webm';
+      const ob = new Blob(chunks, { type }), on = `${(albumName || 'album').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '-')}-album.${ext}`;
+      saveBlob(ob, on); DB.saveMedia('album:' + key, 'clip', ob, on).catch(() => {});
+      setExporting(''); say(tx('Album exporté — rangé dans Mon album'));
+    };
+    mr.start(500); draw();
+    exportStop.current = finish;
+    setTimeout(finish, (total + 0.6) * 1000);
+  };
 
   // ---------- clip ----------
   const clipRef = useRef(null);
@@ -706,6 +768,7 @@ export default function Page() {
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     if (!renderer.current || renderer.current.cv !== cv) renderer.current = new ClipRenderer(cv);
     renderer.current.setup(scenario, photos.current, videoBg.current);
+    renderer.current.cover = coverImg.current;
     if (song.clip.cutout) loadCutout().catch(() => {});
     let raf; const freq = new Uint8Array(512);
     const f = () => {
@@ -1185,6 +1248,7 @@ export default function Page() {
           <label className="f">{tx("Thème visuel")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
           <div className="chips cats">{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + ((themeCat || THEMES[scenario.theme]?.c || 'lum') === k ? ' on' : '')} onClick={() => setThemeCat(k)}>{tx(n)}</button>)}</div>
           <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.disc !== false} onChange={(e) => up((s) => (s.clip.disc = e.target.checked))} /> {coverUrl ? tx('Pastille de ma pochette qui tourne (style TikTok)') : tx('Pastille de pochette (crée ta pochette dans Mon album)')}</label>
           <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.lyrBox !== false} onChange={(e) => up((s) => (s.clip.lyrBox = e.target.checked))} /> {tx('Paroles dans une case qui s’adapte au fond (meilleur contraste)')}</label>
           <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
           <div className="row" style={{ marginTop: 10 }}>
@@ -1198,7 +1262,7 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="share" s={28} /> {tx("Exporter")}</h3>
           {exporting ? <>
-            <div className="row"><span className="busy" /> {tx('Export {w} en cours… garde l’écran allumé.', { w: exporting === 'clip' ? tx('du clip') : exporting === 'wav' ? 'WAV' : 'MP4' })}</div>
+            <div className="row"><span className="busy" /> {tx('Export {w} en cours… garde l’écran allumé.', { w: exporting === 'clip' ? tx('du clip') : exporting === 'album' ? tx('de l’album') : exporting === 'wav' ? 'WAV' : 'MP4' })}</div>
             {exporting !== 'wav' && <button className="btn sm" style={{ marginTop: 8 }} onClick={() => exportStop.current?.()}><Ic n="stop" /> {tx("Arrêter et enregistrer")}</button>}
           </> : <>
           <label className="f">{tx("Partie à exporter")}</label>
@@ -1229,6 +1293,7 @@ export default function Page() {
       <div className="transport"><div className="in">
         <button className="tbtn" onClick={() => { stop(); }} aria-label={tx("Arrêter")}><Ico n="stop" s={34} /></button>
         <button className="play" onClick={() => (playing ? stop() : play({ from: 0 }))} aria-label={tx("Lecture")}>{playing ? <Ico n="pause" s={52} /> : <Ico n="play" s={52} />}</button>
+        {coverUrl && <img className={'tdisc' + (playing ? ' spin' : '')} src={coverUrl} alt="" onClick={() => setSheet({ type: 'songs' })} />}
         <div className="tinfo">
           <b>{rec ? <><span className="rec-dot" /> {tx("Enregistrement…")}</> : song.title}</b>
           {tx(M.STYLES[song.style].n)} · {keyLabel} · {song.bpm} BPM · <span className="pos">{posLabel}</span>
@@ -1261,7 +1326,8 @@ export default function Page() {
           <div style={{ maxHeight: 320, display: 'flex' }}><AvatarGrid value={me.av} onPick={(a) => setMe({ ...me, av: a })} /></div>
           <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
-        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} />}
+        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} />}
+        {sheet.type === 'cover' && <CoverEditor album={sheet.album} song={song} me={me} onSave={(url) => { saveCover(sheet.album, url); setCoverV((x) => x + 1); say(tx('Pochette enregistrée')); setSheet({ type: 'songs' }); }} onCancel={() => setSheet({ type: 'songs' })} />}
         {sheet.type === 'settings' && <>
           <h3><Ico n="settings" s={28} /> {tx("Réglages")}</h3>
           <div className="hint">{tx('IA : ')}{aiStatus == null ? '…' : aiStatus.ai ? tx('Clé Anthropic détectée ✓') : tx('Aucune clé (ajoute ANTHROPIC_API_KEY dans Vercel)')}</div>
@@ -1459,6 +1525,41 @@ function CamStudio({ song, tl, eng, ensureAudio, play, stop, onDone, onClose, sc
       </div>
     </div>
   );
+}
+
+function CoverEditor({ album, song, me, onSave, onCancel }) {
+  const cv = useRef(null);
+  const [o, setO] = useState(() => ({ bg: 'theme', theme: song.clip?.theme || 'coucher', title: album || tx('Mon album'), artist: me?.artist || me?.name || '', font: 'sora', layout: 'bas', color: '#ffffff', t: 8.4, seed: 7, zoom: 1, photo: null }));
+  const [cat, setCat] = useState(THEMES[o.theme]?.c || 'nat');
+  useEffect(() => { if (cv.current) drawCover(cv.current, o); }, [o]);
+  const set = (k, x) => setO((p) => ({ ...p, [k]: x }));
+  return <>
+    <h3><Ic n="palette" /> {tx('Ma pochette d’album')}</h3>
+    <canvas ref={cv} className="cover-cv" />
+    <label className="f">{tx('Titre')}</label><input type="text" value={o.title} onChange={(e) => set('title', e.target.value)} />
+    <label className="f">{tx('Artiste')}</label><input type="text" value={o.artist} onChange={(e) => set('artist', e.target.value)} />
+    <label className="f">{tx('Fond')}</label>
+    <div className="chips">
+      <button className={'chip' + (o.bg === 'theme' ? ' on' : '')} onClick={() => set('bg', 'theme')}>{tx('Thème illustré')}</button>
+      <label className={'chip' + (o.bg === 'photo' ? ' on' : '')}><Ic n="images" size={14} /> {tx('Ma photo')}<input type="file" accept="image/*" hidden onChange={async (e) => { const im = e.target.files[0] && (await loadImage(e.target.files[0])); if (im) setO((p) => ({ ...p, bg: 'photo', photo: im })); }} /></label>
+      {o.bg === 'theme' && <button className="chip" onClick={() => setO((p) => ({ ...p, t: Math.random() * 40, seed: 1 + Math.floor(Math.random() * 9999) }))}><Ic n="dice" size={14} /> {tx('Varier')}</button>}
+    </div>
+    {o.bg === 'theme' && <>
+      <div className="chips cats" style={{ marginTop: 6 }}>{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + (cat === k ? ' on' : '')} onClick={() => setCat(k)}>{tx(n)}</button>)}</div>
+      <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c === cat).map(([k, t]) => <button key={k} className={'chip' + (o.theme === k ? ' on' : '')} onClick={() => set('theme', k)}>{tx(t.n)}</button>)}</div>
+    </>}
+    {o.bg === 'photo' && <><label className="f">{tx('Zoom')}</label><input type="range" min="1" max="2.5" step="0.05" value={o.zoom} onChange={(e) => set('zoom', +e.target.value)} style={{ width: '100%' }} /></>}
+    <label className="f">{tx('Écriture')}</label>
+    <div className="chips">{Object.entries(COVER_FONTS).map(([k, f]) => <button key={k} className={'chip' + (o.font === k ? ' on' : '')} onClick={() => set('font', k)}>{tx(f.n)}</button>)}</div>
+    <div className="chips" style={{ marginTop: 6 }}>{Object.entries(COVER_LAYOUTS).map(([k, n]) => <button key={k} className={'chip' + (o.layout === k ? ' on' : '')} onClick={() => set('layout', k)}>{tx(n)}</button>)}</div>
+    <div className="chips" style={{ marginTop: 6 }}>{[['#ffffff', 'Blanc'], ['grad', 'Néon'], ['#fde68a', 'Or'], ['#111111', 'Noir'], ['#f472b6', 'Rose']].map(([c, n]) => <button key={c} className={'chip' + (o.color === c ? ' on' : '')} onClick={() => set('color', c)}><span className="sw" style={{ background: c === 'grad' ? 'var(--grad)' : c }} /> {tx(n)}</button>)}</div>
+    <div className="row" style={{ marginTop: 12 }}>
+      <button className="btn pri" onClick={() => onSave(drawCover(cv.current, o))}><Ic n="check" /> {tx('Enregistrer la pochette')}</button>
+      <button className="btn" onClick={onCancel}>{tx('Annuler')}</button>
+      {loadCover(album) && <button className="btn sm" style={{ color: 'var(--pink)' }} onClick={() => onSave('')}><Ico n="trash" s={18} /> {tx('Retirer')}</button>}
+    </div>
+    <div className="hint" style={{ marginTop: 6 }}>{tx('Ta pochette apparaît quand ta musique joue, en pastille qui tourne dans tes clips (style TikTok) et dans l’album en MP4.')}</div>
+  </>;
 }
 
 function Structure({ song, up, tl, play, clock }) {
@@ -1753,7 +1854,7 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
   );
 }
 
-function SongsSheet({ song, me, load, close, say }) {
+function SongsSheet({ song, me, load, close, say, onCover, onAlbumMp4, coverV }) {
   const [list, setList] = useState(null);
   const [arm, setArm] = useState(null);
   const [withRec, setWithRec] = useState(true);
@@ -1825,6 +1926,23 @@ function SongsSheet({ song, me, load, close, say }) {
       <button className="chip" onClick={newAlbum}><Ic n="plus" size={14} /> {tx('Nouvel album')}</button>
       {sel !== DEF && <button className="chip" onClick={renameAlbum}><Ic n="pen" size={14} /> {tx('Renommer')}</button>}
     </div>
+    <div className="alb-head">
+      {(() => { const u = loadCover(sel === DEF ? '' : sel); return u ? <img src={u} alt="" className="alb-cover" onClick={() => onCover(sel === DEF ? '' : sel)} /> : <button className="alb-cover empty" onClick={() => onCover(sel === DEF ? '' : sel)}><Ico n="disc-note" s={34} /><small>{tx('Créer ma pochette')}</small></button>; })()}
+      <div className="grow">
+        <b>{sel}</b>
+        <div className="hint">{tx('{n} chanson(s)', { n: inAlb.length })}{me?.artist || me?.name ? ' · ' + (me.artist || me.name) : ''}</div>
+        <div className="row" style={{ marginTop: 6 }}>
+          <button className="btn sm" onClick={() => onCover(sel === DEF ? '' : sel)}><Ic n="palette" /> {tx('Pochette')}</button>
+          <button className="btn sm pri" disabled={!inAlb.length} onClick={() => onAlbumMp4(sel)}><Ico n="play" s={18} /> {tx('Album en MP4')}</button>
+        </div>
+      </div>
+    </div>
+    {media.filter((m) => m.songId === 'album:' + (sel === DEF ? '' : sel)).map((m) => <div key={m.id} className="alb-media">
+      <div className="row nw"><Ico n="disc-note" s={20} /><div className="grow"><b>{tx('Album complet')}</b><small> · {fmtSize(m.size || m.blob.size)} · {day(m.updated)}</small></div>
+        <button className="mini" onClick={() => dl(m)}><Ic n="download" /></button>
+        <button className={'tgl' + (arm === m.id ? ' on' : '')} onClick={async () => { if (arm !== m.id) { setArm(m.id); say(tx('Touche encore la corbeille pour supprimer')); return; } await DB.deleteMedia(m.id); setArm(null); refresh(); }}><Ico n="trash" s={20} /></button></div>
+      <div className="chips" style={{ marginTop: 6 }}><button className="chip on" onClick={() => shareTo(m)}><Ico n="share" s={16} /> {tx('Partager')}</button><button className="chip" onClick={() => shareTo(m, 'youtube')}>YouTube</button><button className="chip" onClick={() => shareTo(m, 'tiktok')}>TikTok</button><button className="chip" onClick={() => shareTo(m, 'instagram')}>Instagram</button><button className="chip" onClick={() => shareTo(m, 'facebook')}>Facebook</button></div>
+    </div>)}
     <div className="hint" style={{ margin: '6px 0 10px' }}>{tx('Tes chansons et tes clips exportés se rangent ici au fur et à mesure. Les nouvelles chansons vont dans l’album choisi.')}</div>
     {ask && <div className="ask-style">
       <b>{tx('On reste dans le même style ?')}</b>
