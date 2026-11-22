@@ -292,3 +292,8 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .wlang { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); margin-bottom: 14px; }
 .wlang button { padding: 6px 14px; border-radius: 9px; font-size: 13px; color: var(--dim); }
 .wlang button.on { background: var(--grad2); color: #fff; }
+.inst-bar { position: fixed; left: 12px; right: 12px; top: calc(var(--safe-t) + 8px); z-index: 80; max-width: 796px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 16px; background: linear-gradient(rgba(14, 11, 30, 0.97), rgba(14, 11, 30, 0.97)) padding-box, var(--grad) border-box; border: 1.5px solid transparent; box-shadow: var(--glow); animation: instIn 0.4s ease both; }
+.inst-bar img { width: 42px; height: 42px; border-radius: 11px; }
+.inst-bar b { display: block; font-size: 14px; }
+.inst-bar small { color: var(--dim); font-size: 12px; line-height: 1.35; display: block; }
+@keyframes instIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }

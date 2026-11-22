@@ -88,6 +88,7 @@ export default function Page() {
   const [aiStatus, setAiStatus] = useState(null);
   const [code, setCode] = useState('');
   const [install, setInstall] = useState(null);
+  const [installUI, setInstallUI] = useState(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
   const [exporting, setExporting] = useState('');
@@ -110,6 +111,12 @@ export default function Page() {
   const lastBpm = useRef(song.bpm);
   const tl = useMemo(() => buildTimeline(song), [v]); // eslint-disable-line
 
+  const doInstall = async () => {
+    const e = install || window.__bip;
+    if (!e) { setSheet({ type: 'settings' }); return; }
+    try { e.prompt(); const r = await e.userChoice; if (r?.outcome === 'accepted') { window.__bip = null; setInstall(null); } } catch (err) { setSheet({ type: 'settings' }); }
+  };
+  const closeInstall = () => { try { sessionStorage.setItem('sonyria-inst-x', '1'); } catch (e) {} setInstallUI({ ...installUI, dismissed: true }); };
   const say = (m) => { setToast(m); clearTimeout(say.t); say.t = setTimeout(() => setToast(''), 3500); };
 
   // ---------- sauvegarde ----------
@@ -153,11 +160,16 @@ export default function Page() {
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
-    if ('serviceWorker' in navigator && location.hostname !== 'localhost') navigator.serviceWorker.register('/sw.js').catch(() => {});
     const off = onLang((l) => { setLangState(l); bump(); });
-    const bip = (e) => { e.preventDefault(); setInstall(e); };
-    window.addEventListener('beforeinstallprompt', bip);
-    return () => { off(); window.removeEventListener('beforeinstallprompt', bip); };
+    // l'événement est capté tôt dans layout.js (sans preventDefault, la bannière native de Chrome reste)
+    const bip = () => setInstall(window.__bip || null);
+    bip();
+    window.addEventListener('sonyria-bip', bip);
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !/crios|fxios/i.test(navigator.userAgent);
+    let dismissed = false; try { dismissed = sessionStorage.getItem('sonyria-inst-x') === '1'; } catch (e) {}
+    setInstallUI({ standalone, ios, dismissed });
+    return () => { off(); window.removeEventListener('sonyria-bip', bip); };
   }, []); // eslint-disable-line
 
   // horloge (karaoké, grille, position)
@@ -533,7 +545,7 @@ export default function Page() {
     <div className="app">
       <IconDefs />
       {splash && <Splash onDone={() => setSplash(false)} />}
-      {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={async () => { install.prompt(); await install.userChoice; setInstall(null); }}
+      {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={doInstall}
         onFinish={(choice) => {
           setMe({ ...me, onboarded: true });
           if (choice === 'paroles') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('paroles'); }
@@ -544,7 +556,7 @@ export default function Page() {
         <img src="/logo.png" alt="Sonyria" />
         <div className="brand">Sonyria<small>{me?.name ? tx('Salut, {n}', { n: me.name }) : tx('Studio de chansons')}</small></div>
         <div className="sp" />
-        {install && <button className="install" onClick={async () => { install.prompt(); await install.userChoice; setInstall(null); }}>{tx("Installer")}</button>}
+        {install && !installUI?.standalone && <button className="install" onClick={doInstall}>{tx("Installer")}</button>}
         <button className="lang-btn" onClick={() => setLang(lang === 'fr' ? 'en' : 'fr')} title="Français / English"><b className={lang === 'fr' ? 'on' : ''}>FR</b><b className={lang === 'en' ? 'on' : ''}>EN</b></button>
         {me?.av && <button className="avatar-btn" onClick={() => setSheet({ type: 'profile' })} title={tx("Mon profil")}><img src={avSrc(me.av)} alt="" /></button>}
         <button className="icon-btn" onClick={() => setSheet({ type: 'songs' })} title={tx("Mes chansons")}><Ico n="folder" s={30} /></button>
@@ -904,6 +916,17 @@ export default function Page() {
         </>}
       </div></div>}
 
+      {!splash && me?.onboarded && installUI && !installUI.standalone && !installUI.dismissed && (install || installUI.ios) && (
+        <div className="inst-bar">
+          <img src="/icon-192.png" alt="" />
+          <div className="grow">
+            <b>{tx('Installer Sonyria')}</b>
+            <small>{install ? tx('Sur ton écran d’accueil, en plein écran, même hors ligne.') : tx('iPhone : touche Partager, puis « Sur l’écran d’accueil ».')}</small>
+          </div>
+          {install && <button className="btn pri sm" onClick={doInstall}>{tx('Installer')}</button>}
+          <button className="mini" onClick={closeInstall} aria-label={tx('Fermer')}><Ic n="x" /></button>
+        </div>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
