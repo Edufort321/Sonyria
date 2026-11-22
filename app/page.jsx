@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 45';
+const APP_VERSION = '2026.11.22 · 46';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -149,6 +149,8 @@ export default function Page() {
   const [exporting, setExporting] = useState('');
   const [micOn, setMicOn] = useState(false);
   const [recT0, setRecT0] = useState(0);
+  const [recPanel, setRecPanel] = useState(false);
+  const [lastTake, setLastTake] = useState(null);
   const [polish, setPolish] = useState(null);
   const [progress, setProgress] = useState('');
   const [splash, setSplash] = useState(true);
@@ -528,6 +530,7 @@ export default function Page() {
     return () => { document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', onLeave); };
   }, []); // eslint-disable-line
   const finishRecRef = useRef(null);
+  const recPanelRef = useRef(false);
   const startRec = async () => {
     const e = await openMic(); if (!e) return;
     keepAwake();
@@ -557,13 +560,15 @@ export default function Page() {
     const newId = 't' + Date.now();
     up((s) => s.tracks.push({ id: newId, name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
     snapshot(tx('Nouvelle prise de voix'));
-    setSheet({ type: 'take', id: newId, dur: buffer.duration, next: recMode === 'sec' });
+    if (recPanelRef.current) setLastTake({ id: newId, dur: buffer.duration }); else setSheet({ type: 'take', id: newId, dur: buffer.duration, next: recMode === 'sec' });
     // sauvegarde tout de suite (pas d'attente) pour ne jamais perdre une prise
     try { const c = S.current; DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {}
     // enregistrement progressif : on passe à la section suivante
     if (recMode === 'sec' && recTo != null) { const i = sections.findIndex((x) => x.to === recTo); const nx = sections[i + 1]; if (nx) { setRecFrom(nx.from); setRecTo(nx.to); say(tx('Prochaine section prête : {n}', { n: M.localLabel(nx.label) })); } }
   };
   finishRecRef.current = finishRec;
+  recPanelRef.current = recPanel;
+  useEffect(() => { if (recPanel) { setLastTake(null); openMic(); } }, [recPanel]); // eslint-disable-line
   const fmtDur = (x) => `${Math.floor(x / 60)}:${String(Math.round(x % 60)).padStart(2, '0')}`;
   const playTake = (t) => {
     const bar = 16 * s16(song.bpm), prev = song.tracks.map((x) => [x.id, x.solo]);
@@ -1414,7 +1419,7 @@ export default function Page() {
           </div>
           </Sub>
           <div style={{ height: 10 }} />
-          {!rec ? <button className="btn rec wide" onClick={startRec}><Ico n="record" s={26} /> {tx("Enregistrer une prise")}</button>
+          {!rec ? <button className="btn rec wide" onClick={() => setRecPanel(true)}><Ico n="record" s={26} /> {tx("Enregistrer une prise")}</button>
             : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> {tx("Arrêter l’enregistrement")}</button>}
           {takes.length > 0 && <div className="mytakes">
             <b>{tx('Mes prises')} ({takes.length})</b>
@@ -1681,11 +1686,14 @@ export default function Page() {
           {tx(M.STYLES[song.style].n)} · {keyLabel} · {song.bpm} BPM · <span className="pos">{posLabel}</span>
         </div>
         <button className={'tbtn' + (loop ? ' on' : '')} onClick={() => setLoop(!loop)} aria-label={tx("Boucle")}><Ico n="loop" s={34} dim={!loop} /></button>
-        <button className="tbtn" onClick={() => setKara(true)} aria-label={tx("Karaoké")}><Ico n="microphone" s={30} /></button>
-        <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : startRec())} aria-label={tx("Enregistrer")}>{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
+        <button className="tbtn" onClick={() => setRecPanel(true)} aria-label={tx('Enregistrer ma voix')}><Ico n="microphone" s={30} /></button>
+        <button className="tbtn" style={{ color: '#ef4444' }} onClick={() => (rec ? finishRec() : setRecPanel(true))} aria-label={tx("Enregistrer")}>{rec ? <Ico n="stop" s={34} /> : <Ico n="record" s={34} />}</button>
       </div></div>
 
-      {rec && <div className={"rec-console" + (kara ? " on-kara" : "")}><MicMeter eng={eng} rec compact t0={recT0} /><button className="btn sm" onClick={finishRec}>■ {tx('Arrêter')}</button></div>}
+      {rec && !recPanel && <div className={"rec-console" + (kara ? " on-kara" : "")}><MicMeter eng={eng} rec compact t0={recT0} /><button className="btn sm" onClick={finishRec}>■ {tx('Arrêter')}</button></div>}
+      {recPanel && <RecPanel song={song} tl={tl} eng={eng} rec={rec} micOn={micOn} recT0={recT0} sections={sections} recMode={recMode} setRecMode={setRecMode} recFrom={recFrom} setRecFrom={setRecFrom} recTo={recTo} setRecTo={setRecTo}
+        up={up} startRec={startRec} finishRec={finishRec} takes={takes} lastTake={lastTake} setLastTake={setLastTake} playTake={playTake} delTake={delTake} fmtDur={fmtDur}
+        onClose={() => { if (rec) finishRec(); setRecPanel(false); }} goStudio={() => { setRecPanel(false); setTab('studio'); }} />}
       {cam && <CamStudio song={song} tl={tl} eng={eng} ensureAudio={ensureAudio} play={play} stop={() => { eng.current?.stop(); setPlaying(false); }} onDone={onFilmed} onClose={() => setCam(false)} scenario={scenario} photos={() => photos.current} onPhotos={async (files) => { photos.current = (await Promise.all(files.slice(0, 12).map(loadImage))).filter(Boolean); bump(); }} />}
       {kara && <Karaoke song={song} tl={tl} eng={eng} playing={playing} rec={rec} onClose={() => setKara(false)} onPlay={() => (playing ? stop() : play({ from: 0 }))} onRec={() => (rec ? finishRec() : startRec())} />}
 
@@ -2137,6 +2145,62 @@ function OnTop({ song, up }) {
       <select value={c.caption?.pos || 'haut'} onChange={(e) => up((s) => (s.clip.caption = { ...(s.clip.caption || {}), pos: e.target.value }))} style={{ maxWidth: 110 }}><option value="haut">{tx('En haut')}</option><option value="centre">{tx('Au centre')}</option></select>
     </div>
     <div className="hint" style={{ marginTop: 6 }}>{tx('Pour les filtres et effets (grain, lumière, confettis…), ouvre « Visuel : couleurs et effets » plus bas.')}</div>
+  </div>;
+}
+
+// studio d'enregistrement : UN seul endroit (micro en bas) — test du son, quoi enregistrer, décompte, paroles, prises
+function RecPanel({ song, tl, eng, rec, micOn, recT0, sections, recMode, setRecMode, recFrom, setRecFrom, recTo, setRecTo, up, startRec, finishRec, takes, lastTake, setLastTake, playTake, delTake, fmtDur, onClose, goStudio }) {
+  const [st, setSt] = useState(null);
+  useEffect(() => { let raf; const f = () => { setSt(eng.current?.songTime() || null); raf = requestAnimationFrame(f); }; f(); return () => cancelAnimationFrame(raf); }, [eng]);
+  const counting = rec && st?.countIn;
+  const act = rec && st && !st.countIn ? currentLine(tl, song, st.t) : null;
+  const cur = act ? tl.lines[act.idx] : null, nxt = act ? tl.lines[act.idx + 1] : tl.lines.find((l) => l.b0 >= recFrom);
+  const lt = lastTake && song.tracks.find((t) => t.id === lastTake.id);
+  const nextSec = recMode === 'sec' && recTo != null ? sections[sections.findIndex((x) => x.to === recTo) + 1] : null;
+  return <div className="recp">
+    <div className="recp-top">
+      <b>{rec ? <><span className="rec-dot" /> {tx('Enregistrement en cours')}</> : tx('Enregistrer ma voix')}</b>
+      <span className="grow" />
+      <button className="btn sm" onClick={onClose}><Ic n="x" /> {tx('Fermer')}</button>
+    </div>
+    <div className="recp-body">
+      {micOn ? <MicMeter eng={eng} rec={rec} t0={recT0} compact={rec} /> : <div className="hint">{tx('Activation du micro… autorise le micro si ton téléphone le demande.')}</div>}
+      {rec ? <div className="recp-lyr">
+        {counting ? <div className="recp-count">{Math.max(1, Math.ceil((st.left || 0) / (4 * s16(song.bpm))))}<small>{tx('Prépare-toi…')}</small></div> : <>
+          {cur ? <b>{cur.text}</b> : <span className="hint">{tx('Intro…')}</span>}
+          {nxt && <small>{nxt.text}</small>}
+        </>}
+      </div> : lastTake && lt ? <div className="take-ok" style={{ marginTop: 12 }}>
+        <b>✓ {lt.name}</b><small>{fmtDur(lastTake.dur)} · {tx('sauvegardée dans ta chanson')}</small>
+        <div className="take-acts" style={{ marginTop: 8 }}>
+          <button className="btn pri wide" onClick={() => playTake(lt)}><Ic n="play" /> {tx('Écouter ma prise')}</button>
+          {nextSec && <button className="btn wide" onClick={() => { setLastTake(null); startRec(); }}><Ico n="record" s={20} /> {tx('Enregistrer la section suivante')} ({M.localLabel(nextSec.label)})</button>}
+          <button className="btn wide" onClick={() => { setLastTake(null); startRec(); }}><Ico n="record" s={20} /> {tx('Faire une autre prise (on garde celle-ci)')}</button>
+          <button className="btn wide" onClick={() => { up((s) => { s.tracks = s.tracks.filter((x) => x.id !== lt.id); }); setLastTake(null); startRec(); }}><Ic n="undo" /> {tx('Refaire : effacer celle-ci et recommencer')}</button>
+        </div>
+      </div> : <>
+        <div className="chips" style={{ marginTop: 10 }}>
+          <button className={'chip' + (recMode === 'all' ? ' on' : '')} onClick={() => { setRecMode('all'); setRecFrom(0); setRecTo(null); }}>{tx('Toute la chanson')}</button>
+          <button className={'chip' + (recMode === 'sec' ? ' on' : '')} onClick={() => { setRecMode('sec'); const s0 = sections.find((x) => !x.inst) || sections[0]; if (s0) { setRecFrom(s0.from); setRecTo(s0.to); } }}>{tx('Une section à la fois')}</button>
+        </div>
+        {recMode === 'sec' && <div className="chips" style={{ marginTop: 6 }}>{sections.filter((x) => !x.inst).map((x, i) => <button key={i} className={'chip' + (recFrom === x.from ? ' on' : '')} onClick={() => { setRecFrom(x.from); setRecTo(x.to); }}>{M.localLabel(x.label)}</button>)}</div>}
+        <div className="chips" style={{ marginTop: 6 }}>
+          <button className={'chip' + (song.countIn ? ' on' : '')} onClick={() => up((s) => (s.countIn = !s.countIn))}>{tx('Décompte 1-2-3-4')}</button>
+          <button className={'chip' + (song.guide ? ' on' : '')} onClick={() => up((s) => (s.guide = !s.guide))}>{tx('Mélodie guide')}</button>
+        </div>
+        <div className="hint" style={{ marginTop: 6 }}>{tx('Mets des écouteurs : la musique ne s’enregistre pas dans le micro et ta voix reste claire.')}</div>
+      </>}
+    </div>
+    <div className="recp-bot">
+      {rec ? <button className="recp-btn on" onClick={finishRec} aria-label={tx('Arrêter')}><span /></button>
+        : <button className="recp-btn" disabled={!micOn} onClick={() => { setLastTake(null); startRec(); }} aria-label={tx('Enregistrer')}><span /></button>}
+      <div className="hint">{rec ? tx('Touche pour arrêter — ta prise est gardée') : tx('Touche le rond rouge pour commencer')}</div>
+      {!rec && takes.length > 0 && <div className="recp-takes">
+        <b>{tx('Mes prises')} ({takes.length})</b>
+        {takes.slice(-4).map((t) => <div key={t.id} className="mt"><button className="mini" onClick={() => playTake(t)}><Ic n="play" size={13} /></button><span className="grow">{t.name}<small> · {fmtDur(t.data.length / t.sr)}</small></span><button className="mini" onClick={() => delTake(t)}><Ico n="trash" s={16} /></button></div>)}
+        <button className="btn sm" onClick={goStudio}>{tx('Toutes mes prises, montage et remix → Studio')}</button>
+      </div>}
+    </div>
   </div>;
 }
 

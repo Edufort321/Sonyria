@@ -1,5 +1,5 @@
 // Sonyria — service worker : ouverture rapide même avec un réseau cellulaire faible, utilisable hors ligne (sauf IA)
-const CACHE = 'sonyria-v45';
+const CACHE = 'sonyria-v46';
 const CORE = ['/', '/manifest.webmanifest', '/logo.png', '/icon-192.png', '/icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).catch(() => {}).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
