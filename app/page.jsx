@@ -100,8 +100,9 @@ export default function Page() {
   const [hum, setHum] = useState({ mode: 'hum', metro: true, onLyrics: true, keepKey: false, instr: 'piano' });
   const [humRec, setHumRec] = useState(false);
   const [ocr, setOcr] = useState(null);
-  const [ocrFix, setOcrFix] = useState(true);
+  const [ocrFix, setOcrFix] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [fs, setFs] = useState(null);
   const [guide, setGuide] = useState({ on: false, step: 0 });
   const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
   const goStep = (i) => {
@@ -243,6 +244,7 @@ export default function Page() {
       s.blocks.forEach((b) => b.lines.forEach((l) => { if (l.notes) old[l.text] = l; }));
       s.lyrics = text;
       s.blocks = M.parseLyrics(text);
+      if (s.blocks.title && (!s.title || s.title === tx('Ma chanson') || s.title === 'Ma chanson' || s.title === 'My song')) s.title = s.blocks.title;
       M.composeSong(s, s.variant);
       s.blocks.forEach((b) => b.lines.forEach((l) => { const o = old[l.text]; if (o && o.syls.length === l.syls.length && o.custom) { l.bars = o.bars; l.chords = [...o.chords]; l.notes = o.notes.map((n) => ({ ...n })); l.custom = true; } }));
     });
@@ -253,6 +255,7 @@ export default function Page() {
     setAmbSel(i);
     up((s) => { applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; M.composeSong(s, s.variant); });
     play({ from: 0, to: Math.min(tl.bars.length, (song.intro ? 2 : 0) + 8), loop: false });
+    say(tx('Extrait de 8 mesures. Touche ▶ en bas pour écouter toute la chanson.'));
   };
 
   // ---------- IA ----------
@@ -647,6 +650,35 @@ export default function Page() {
   const nm = (m) => M.midiName(m, song.fr);
   const posLabel = clock && !clock.countIn ? `M${Math.floor(clock.step / 16) + 1}.${Math.floor((clock.step % 16) / 4) + 1}` : '—';
 
+  const beatGridEl = (
+          <div className="grid">
+            {M.DRUM_ROWS.map((r) => (
+              <div key={r} style={{ display: 'contents' }}>
+                <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>
+                {song.drums[r].map((on, i) => (
+                  <button key={i} className={'cell' + (Math.floor(i / 4) % 2 ? ' g' : '') + (on ? ' on' : '') + (r === 'kick' ? ' k' : r === 'hat' || r === 'open' ? ' h' : '') + (playing && clock && clock.step >= 0 && clock.step % 16 === i ? ' now' : '')}
+                    onClick={async () => { up((s) => { s.drums[r][i] = s.drums[r][i] ? 0 : 1; }); if (!song.drums[r][i]) return; const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }} />
+                ))}
+              </div>
+            ))}
+          </div>
+  );
+  const padsEl = (
+          <div className="pads">
+            {[['kick', 'Kick', 'drum'], ['snare', 'Snare', 'snare'], ['clap', 'Clap', 'clap'], ['hat', 'Hat', 'snap'], ['open', 'Open hat', 'cd']].map(([k, n, ic]) => <button key={k} className="pad" onPointerDown={async () => { const e = await ensureAudio(); e.drum(k, e.ctx.currentTime); }}><Ico n={ic} s={34} /><span>{n}</span></button>)}
+            {[1, 4, 5, 6, 2, 3, 7].map((d) => <button key={d} className="pad" style={{ color: '#bfdbfe' }} onPointerDown={async () => { const e = await ensureAudio(); e.previewChord(song, d); }}><Ico n="piano" s={28} /><span>{M.chordName(d, song.key, song.mode, song.fr)}</span></button>)}
+          </div>
+  );
+  const presetsEl = (
+          <div className="chips" style={{ marginBottom: 10 }}>
+            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => (s.drums = M.drumPreset(k)))}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
+          </div>
+  );
+  const openFs = (k) => {
+    setFs(k);
+    try { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().then(() => { if (k !== 'arr') screen.orientation?.lock?.('landscape').catch(() => {}); }).catch(() => {}); } catch (e) {}
+  };
+  const closeFs = () => { setFs(null); try { screen.orientation?.unlock?.(); if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} };
   const TABS = [['paroles', 'new', 'Paroles'], ['melodie', 'note', 'Mélodie'], ['beat', 'drumkit', 'Beat'], ['studio', 'studio-mic', 'Studio'], ['table', 'sliders', 'Table'], ['clip', 'spectrum', 'Clip']];
 
   return (
@@ -718,6 +750,7 @@ export default function Page() {
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
+            <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = newSong(''); n.id = song.id; n.artist = song.artist; load(n); say(tx('Page blanche — on recommence')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
@@ -740,7 +773,7 @@ export default function Page() {
             </div>
           </div>}
           <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setPrintOpen(true)}><Ico n="treble" s={18} /> {tx('Imprimer paroles et partition')}</button>
-          <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })}</div>
+          <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })} · {tx('durée')} ≈ {Math.floor(tl.steps * s16(song.bpm) / 60)} min {String(Math.round(tl.steps * s16(song.bpm) % 60)).padStart(2, '0')} s</div>
         </div>
 
         {guide.on && me?.onboarded && GUIDE[guide.step]?.anchor === 'g-amb' && <div id="g-amb-guide"><GuideCard step={guide.step} go={goStep} hide={() => saveGuide({ ...guide, on: false })} /></div>}
@@ -802,7 +835,7 @@ export default function Page() {
           </div>
         </div>
 
-        <Arrangement song={song} up={up} preload={async () => { const e = await ensureAudio(); prepareSamples(e.ctx, song); }} />
+        <Arrangement song={song} up={up} preload={async () => { const e = await ensureAudio(); prepareSamples(e.ctx, song); }} onFull={() => openFs('arr')} />
         {song.blocks.map((b, bi) => (
           <div key={bi}>
             <div className="sec-h">
@@ -866,29 +899,14 @@ export default function Page() {
         </div>
 
         <div className="card">
-          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true })}><Ic n="loop" /> {tx("Boucle")}</button></h3>
-          <div className="chips" style={{ marginBottom: 10 }}>
-            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => (s.drums = M.drumPreset(k)))}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
-          </div>
-          <div className="grid">
-            {M.DRUM_ROWS.map((r) => (
-              <div key={r} style={{ display: 'contents' }}>
-                <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>
-                {song.drums[r].map((on, i) => (
-                  <button key={i} className={'cell' + (Math.floor(i / 4) % 2 ? ' g' : '') + (on ? ' on' : '') + (r === 'kick' ? ' k' : r === 'hat' || r === 'open' ? ' h' : '') + (playing && clock && clock.step >= 0 && clock.step % 16 === i ? ' now' : '')}
-                    onClick={async () => { up((s) => { s.drums[r][i] = s.drums[r][i] ? 0 : 1; }); if (!song.drums[r][i]) return; const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }} />
-                ))}
-              </div>
-            ))}
-          </div>
+          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true })}><Ic n="loop" /> {tx("Boucle")}</button><button className="btn sm pri" onClick={() => openFs('beat')}><Ic n="max" /> {tx('Plein écran')}</button></h3>
+          {presetsEl}
+          {beatGridEl}
         </div>
 
         <div className="card">
           <h3><Ico n="pad-grid" s={28} /> {tx("Pads en direct")}</h3>
-          <div className="pads">
-            {[['kick', 'Kick', 'drum'], ['snare', 'Snare', 'snare'], ['clap', 'Clap', 'clap'], ['hat', 'Hat', 'snap'], ['open', 'Open hat', 'cd']].map(([k, n, ic]) => <button key={k} className="pad" onPointerDown={async () => { const e = await ensureAudio(); e.drum(k, e.ctx.currentTime); }}><Ico n={ic} s={34} /><span>{n}</span></button>)}
-            {[1, 4, 5, 6, 2, 3, 7].map((d) => <button key={d} className="pad" style={{ color: '#bfdbfe' }} onPointerDown={async () => { const e = await ensureAudio(); e.previewChord(song, d); }}><Ico n="piano" s={28} /><span>{M.chordName(d, song.key, song.mode, song.fr)}</span></button>)}
-          </div>
+          {padsEl}
         </div>
       </>}
 
@@ -981,7 +999,7 @@ export default function Page() {
       </>}
 
       {/* ================= TABLE DE SON ================= */}
-      {tab === 'table' && <Mixer song={song} up={up} eng={eng} playing={playing} />}
+      {tab === 'table' && <Mixer song={song} up={up} eng={eng} playing={playing} onFull={() => openFs('mix')} />}
 
       {/* ================= CLIP ================= */}
       {tab === 'clip' && <>
@@ -1099,6 +1117,24 @@ export default function Page() {
       )}
       {toast && <div className="toast">{toast}</div>}
       {printOpen && <PrintView song={song} me={me} onClose={() => setPrintOpen(false)} />}
+      {fs && <div className={'fs fs-' + fs}>
+        <div className="fs-bar">
+          <button className="play" onClick={() => (playing ? stop() : play(fs === 'beat' ? { from: 0, to: Math.min(tl.bars.length, 4), loop: true } : { from: 0 }))} aria-label={tx('Lecture')}>{playing ? <Ico n="pause" s={48} /> : <Ico n="play" s={48} />}</button>
+          <div className="fs-title"><b>{fs === 'beat' ? 'Beat table' : fs === 'arr' ? tx('Arrangement') : tx('Table de son')}</b><small>{song.title} · {tx(M.STYLES[song.style].n)} · {song.bpm} BPM · <span className="pos">{posLabel}</span></small></div>
+          {fs === 'beat' && <div className="row nw" style={{ gap: 4 }}>
+            <button className="tbtn" onClick={() => up((s) => (s.bpm = clamp(s.bpm - 1, 50, 200)))}>−</button>
+            <b className="fs-bpm">{song.bpm}</b>
+            <button className="tbtn" onClick={() => up((s) => (s.bpm = clamp(s.bpm + 1, 50, 200)))}>+</button>
+            <button className="btn sm" onClick={tapTempo}><Ic n="tap" /> Tap</button>
+          </div>}
+          <button className="btn sm" onClick={closeFs}><Ic n="min" /> {tx('Quitter')}</button>
+        </div>
+        <div className="fs-body">
+          {fs === 'beat' && <>{presetsEl}{beatGridEl}<div style={{ height: 12 }} />{padsEl}</>}
+          {fs === 'arr' && <Arrangement song={song} up={up} preload={async () => { const e = await ensureAudio(); prepareSamples(e.ctx, song); }} />}
+          {fs === 'mix' && <Mixer song={song} up={up} eng={eng} playing={playing} />}
+        </div>
+      </div>}
       </div>
     </>
   );
@@ -1150,7 +1186,7 @@ function Wave({ track }) {
   return <canvas ref={ref} className="wave" />;
 }
 
-function Arrangement({ song, up, preload }) {
+function Arrangement({ song, up, preload, onFull }) {
   const [adding, setAdding] = useState(null); // null | 'role' | nom du rôle
   const layers = ensureLayers(song);
   const edit = (id, fn) => up((s) => { const l = ensureLayers(s).find((x) => x.id === id); if (l) fn(l); });
@@ -1158,6 +1194,7 @@ function Arrangement({ song, up, preload }) {
     <div className="card arr">
       <h3><Ico n="mixer" s={28} /> {tx('Arrangement')}<span className="sp" />
         <button className="btn sm" onClick={() => { up((s) => { s.layers = defaultLayers(s); }); preload(); }} title={tx('Remettre l’arrangement du style')}><Ic n="undo" /></button>
+        {onFull && <button className="btn sm pri" onClick={onFull} aria-label={tx('Plein écran')}><Ic n="max" /></button>}
       </h3>
       <div className="hint" style={{ marginBottom: 8 }}>{tx('Instruments de la proposition. Ajoute, enlève ou dose chaque instrument, même pendant que ça joue.')}</div>
       {layers.map((l) => (
@@ -1310,7 +1347,7 @@ function MicMeter({ eng }) {
   return <div><div className="hint"><Ic n="mic" size={13} /> {tx("Micro actif — niveau")}</div><div className="meter"><i style={{ width: Math.min(100, lv * 140) + '%' }} /></div></div>;
 }
 
-function Mixer({ song, up, eng, playing }) {
+function Mixer({ song, up, eng, playing, onFull }) {
   const [lv, setLv] = useState({});
   useEffect(() => {
     let raf, n = 0;
@@ -1321,7 +1358,7 @@ function Mixer({ song, up, eng, playing }) {
   const strips = [['lead', 'Voix guide', 'note'], ['harm', 'Harmonie', 'wave-pink'], ['chords', 'Accords', 'piano'], ['bass', 'Basse', 'bass'], ['drums', 'Batterie', 'drumkit'], ['tracks', 'Pistes', 'mic']];
   return <>
     <div className="card">
-      <h3><Ico n="mixer" s={28} /> {tx("Table de son")}</h3>
+      <h3><Ico n="mixer" s={28} /> {tx("Table de son")}<span className="sp" />{onFull && <button className="btn sm pri" onClick={onFull}><Ic n="max" /> {tx('Plein écran')}</button>}</h3>
       <div className="console">
         {strips.map(([k, n, i]) => <Strip key={k} name={tx(n)} icon={i} val={m[k]} meter={lv[k]} set={(x) => up((s) => (s.mix[k] = x))} mute={m.mute[k]} solo={m.solo[k]}
           onMute={() => up((s) => (s.mix.mute[k] = !s.mix.mute[k]))} onSolo={() => up((s) => (s.mix.solo[k] = !s.mix.solo[k]))} />)}
@@ -1406,12 +1443,18 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
 
 function SongsSheet({ song, load, close, say }) {
   const [list, setList] = useState(null);
+  const [arm, setArm] = useState(null);
   const refresh = () => DB.listSongs().then(setList).catch(() => setList([]));
   useEffect(() => { refresh(); }, []);
   return <>
     <h3><Ico n="folder" s={28} /> {tx("Mes chansons")}</h3>
     <div className="row" style={{ marginBottom: 10 }}>
       <button className="btn pri" onClick={() => { load(newSong('')); close(); }}>{tx("＋ Nouvelle chanson")}</button>
+      {list?.length > 0 && <button className="btn" style={{ color: 'var(--pink)' }} onClick={async () => {
+        if (arm !== 'all') { setArm('all'); say(tx('Touche encore pour tout supprimer')); return; }
+        for (const x of list) await DB.deleteSong(x.id);
+        setArm(null); refresh(); load(newSong('')); say(tx('Tout a été supprimé'));
+      }}><Ico n="trash" s={20} /> {arm === 'all' ? tx('Confirmer : tout supprimer') : tx('Tout supprimer')}</button>}
       <button className="btn" onClick={() => { const c = structuredClone(serialize(song)); c.id = 's' + Date.now(); c.title = song.title + tx(' (copie)'); load(c); close(); say(tx('Copie créée')); }}>{tx("⧉ Dupliquer")}</button>
     </div>
     {list == null ? <span className="busy" /> : !list.length ? <div className="hint">{tx("Rien d’enregistré pour l’instant (sauvegarde automatique).")}</div> :
@@ -1420,7 +1463,11 @@ function SongsSheet({ song, load, close, say }) {
           <button className="grow" style={{ textAlign: 'left' }} onClick={async () => { const r = await DB.getSong(x.id); if (r) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } }}>
             <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}<div className="hint">{new Date(x.updated).toLocaleString(getLang() === 'en' ? 'en-CA' : 'fr-CA')}</div>
           </button>
-          {x.id !== song.id && <button className="tgl" onClick={async () => { await DB.deleteSong(x.id); refresh(); }} aria-label={tx("Supprimer")}><Ico n="trash" s={24} /></button>}
+          <button className={'tgl' + (arm === x.id ? ' on' : '')} onClick={async () => {
+            if (arm !== x.id) { setArm(x.id); say(tx('Touche encore la corbeille pour supprimer')); return; }
+            await DB.deleteSong(x.id); setArm(null); refresh();
+            if (x.id === song.id) { load(newSong('')); say(tx('Chanson supprimée — page blanche prête')); } else say(tx('Chanson supprimée'));
+          }} aria-label={tx("Supprimer")}><Ico n="trash" s={24} /></button>
         </div>
       ))}
   </>;

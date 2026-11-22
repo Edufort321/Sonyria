@@ -425,3 +425,23 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .arr-add { margin-top: 8px; padding: 10px; border-radius: 14px; border: 1.5px dashed rgba(34, 211, 238, 0.45); }
 .arr-vol { grid-template-columns: 86px 1fr 48px; }
 .arr-vol small { max-width: 86px; }
+/* ===== plein écran : instruments, beat table, table de son ===== */
+.fs { position: fixed; inset: 0; z-index: 110; background: radial-gradient(900px 500px at 20% -10%, rgba(34, 211, 238, 0.12), transparent 60%), radial-gradient(800px 600px at 110% 10%, rgba(168, 85, 247, 0.18), transparent 60%), #05040b; display: flex; flex-direction: column; }
+.fs-bar { display: flex; align-items: center; gap: 10px; padding: calc(var(--safe-t) + 6px) 14px 6px; background: linear-gradient(180deg, #171131, #07050f); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.fs-bar::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--grad); }
+.fs-bar .play { width: 54px; height: 54px; }
+.fs-title { flex: 1; min-width: 140px; display: flex; flex-direction: column; }
+.fs-title b { font-size: 18px; }
+.fs-title small { color: var(--dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-bpm { font: 700 22px 'JetBrains Mono', monospace; min-width: 50px; text-align: center; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.fs-body { flex: 1; overflow: auto; padding: 12px 14px calc(var(--safe-b) + 16px); max-width: 1400px; width: 100%; margin: 0 auto; }
+.fs-body .card { margin-top: 0; }
+.fs-beat .grid { grid-template-columns: 120px repeat(16, 1fr); gap: 6px; }
+.fs-beat .grid .lbl { font-size: 13px; text-align: left; }
+.fs-beat .cell { aspect-ratio: auto; height: clamp(34px, 9vh, 70px); border-radius: 8px; }
+.fs-beat .pads { grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.fs-beat .pad { aspect-ratio: auto; height: clamp(70px, 14vh, 120px); }
+.fs-mix .fader { height: clamp(220px, 58vh, 520px); }
+.fs-mix .strip { flex: 1 0 86px; }
+.fs-arr .arr-row { padding: 12px; }
+@media (orientation: landscape) and (max-height: 500px) { .fs-beat .cell { height: clamp(26px, 8vh, 44px); } .fs-beat .pad { height: 60px; } .fs-mix .fader { height: 52vh; } }
