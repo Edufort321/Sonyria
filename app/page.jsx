@@ -11,6 +11,7 @@ import * as H from '@/lib/hum';
 import { imageToJpeg, toB64, docxText } from '@/lib/importText';
 import { renderScore, chordSheet } from '@/lib/score';
 import * as DB from '@/lib/storage';
+import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
@@ -179,6 +180,7 @@ export default function Page() {
         try { const gg = JSON.parse(localStorage.getItem('sonyria-guide') || 'null'); setGuide(gg || { on: true, step: 0 }); } catch (e) { setGuide({ on: true, step: 0 }); }
         setLangState(initLang());
         if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
+        if (typeof window !== 'undefined' && 'launchQueue' in window) window.launchQueue.setConsumer(async (p) => { const h = p.files?.[0]; if (!h) return; try { const { song: s } = await fileToSong(await h.getFile()); const d = newSong(); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); } catch (e) {} });
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
@@ -651,10 +653,13 @@ export default function Page() {
   const posLabel = clock && !clock.countIn ? `M${Math.floor(clock.step / 16) + 1}.${Math.floor((clock.step % 16) / 4) + 1}` : '—';
 
   const beatGridEl = (
-          <div className="grid">
-            {M.DRUM_ROWS.map((r) => (
+          <><div className="grid">
+            {M.drumRows(song.drums).map((r) => (
               <div key={r} style={{ display: 'contents' }}>
-                <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>
+                <div className="lbl-w">
+                  <button className="lbl" onClick={async () => { const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>
+                  {M.EXTRA_DRUMS.includes(r) && <button className="lbl-x" onClick={() => up((s) => { delete s.drums[r]; })} aria-label={tx('Enlever ce son')}>×</button>}
+                </div>
                 {song.drums[r].map((on, i) => (
                   <button key={i} className={'cell' + (Math.floor(i / 4) % 2 ? ' g' : '') + (on ? ' on' : '') + (r === 'kick' ? ' k' : r === 'hat' || r === 'open' ? ' h' : '') + (playing && clock && clock.step >= 0 && clock.step % 16 === i ? ' now' : '')}
                     onClick={async () => { up((s) => { s.drums[r][i] = s.drums[r][i] ? 0 : 1; }); if (!song.drums[r][i]) return; const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }} />
@@ -662,16 +667,21 @@ export default function Page() {
               </div>
             ))}
           </div>
+          {M.EXTRA_DRUMS.some((r) => !song.drums[r]) && <div className="add-snd">
+            <b><Ic n="plus" size={14} /> {tx('Ajouter un son')}</b>
+            <div className="chips">{M.EXTRA_DRUMS.filter((r) => !song.drums[r]).map((r) => <button key={r} className="chip" onClick={async () => { up((s) => { s.drums[r] = Array(16).fill(0); }); const e = await ensureAudio(); e.drum(r, e.ctx.currentTime); }}>{tx(M.DRUM_LABELS[r])}</button>)}</div>
+          </div>}
+          </>
   );
   const padsEl = (
           <div className="pads">
-            {[['kick', 'Kick', 'drum'], ['snare', 'Snare', 'snare'], ['clap', 'Clap', 'clap'], ['hat', 'Hat', 'snap'], ['open', 'Open hat', 'cd']].map(([k, n, ic]) => <button key={k} className="pad" onPointerDown={async () => { const e = await ensureAudio(); e.drum(k, e.ctx.currentTime); }}><Ico n={ic} s={34} /><span>{n}</span></button>)}
+            {[['kick', 'Kick', 'drum'], ['snare', 'Snare', 'snare'], ['clap', 'Clap', 'clap'], ['hat', 'Hat', 'snap'], ['open', 'Open hat', 'cd'], ...M.EXTRA_DRUMS.filter((r) => song.drums[r]).map((r) => [r, tx(M.DRUM_LABELS[r]), 'drum'])].map(([k, n, ic]) => <button key={k} className="pad" onPointerDown={async () => { const e = await ensureAudio(); e.drum(k, e.ctx.currentTime); }}><Ico n={ic} s={34} /><span>{n}</span></button>)}
             {[1, 4, 5, 6, 2, 3, 7].map((d) => <button key={d} className="pad" style={{ color: '#bfdbfe' }} onPointerDown={async () => { const e = await ensureAudio(); e.previewChord(song, d); }}><Ico n="piano" s={28} /><span>{M.chordName(d, song.key, song.mode, song.fr)}</span></button>)}
           </div>
   );
   const presetsEl = (
           <div className="chips" style={{ marginBottom: 10 }}>
-            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => (s.drums = M.drumPreset(k)))}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
+            {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => { const ex = {}; M.EXTRA_DRUMS.forEach((r) => { if (s.drums[r]) ex[r] = k === 'vide' ? Array(16).fill(0) : s.drums[r]; }); s.drums = { ...M.drumPreset(k), ...ex }; })}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
           </div>
   );
   const openFs = (k) => {
@@ -836,13 +846,14 @@ export default function Page() {
         </div>
 
         <Arrangement song={song} up={up} preload={async () => { const e = await ensureAudio(); prepareSamples(e.ctx, song); }} onFull={() => openFs('arr')} />
+        <Structure song={song} up={up} tl={tl} play={play} clock={clock} />
         {song.blocks.map((b, bi) => (
           <div key={bi}>
             <div className="sec-h">
               <button className={'sec-tag ' + b.type} onClick={() => up((s) => { const o = ['verse', 'chorus', 'bridge']; s.blocks[bi].type = o[(o.indexOf(b.type) + 1) % 3]; M.composeSong(s, s.variant); })}>{(() => { const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); return lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`; })()}</button>
               <button className="chip" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => up((s) => { const o = ['soft', 'emo', 'normal', 'loud']; s.blocks[bi].dyn = o[(o.indexOf(b.dyn || 'normal') + 1) % 4]; })}><Ic size={12} n={{ soft: 'feather', emo: 'drop', normal: 'music', loud: 'flame' }[b.dyn || 'normal']} /> {tx(M.DYN_LABEL[b.dyn || 'normal'])}</button>
               <span className="sp" style={{ flex: 1 }} />
-              <button className="mini" onClick={() => { const L = tl.lines.filter((l) => l.bi === bi); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); }}><Ic n="play" size={15} fill="currentColor" /></button>
+              <button className="mini" onClick={() => { const L = tl.lines.filter((l) => l.bi === bi && !l.occ); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); }}><Ic n="play" size={15} fill="currentColor" /></button>
             </div>
             {b.lines.map((l, li) => {
               const L = tl.lines.find((x) => x.bi === bi && x.li === li);
@@ -1085,7 +1096,7 @@ export default function Page() {
           <div style={{ maxHeight: 320, display: 'flex' }}><AvatarGrid value={me.av} onPick={(a) => setMe({ ...me, av: a })} /></div>
           <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
-        {sheet.type === 'songs' && <SongsSheet song={song} load={load} close={() => setSheet(null)} say={say} />}
+        {sheet.type === 'songs' && <SongsSheet song={song} me={me} load={load} close={() => setSheet(null)} say={say} />}
         {sheet.type === 'settings' && <>
           <h3><Ico n="settings" s={28} /> {tx("Réglages")}</h3>
           <div className="hint">{tx('IA : ')}{aiStatus == null ? '…' : aiStatus.ai ? tx('Clé Anthropic détectée ✓') : tx('Aucune clé (ajoute ANTHROPIC_API_KEY dans Vercel)')}</div>
@@ -1184,6 +1195,43 @@ function Wave({ track }) {
     for (let x = 0; x < W; x++) { let m = 0; for (let i = x * step; i < (x + 1) * step && i < d.length; i += 4) m = Math.max(m, Math.abs(d[i])); const h = Math.max(1, m * H * 0.95); g.fillRect(x, (H - h) / 2, 1, h); }
   }, [track.data]);
   return <canvas ref={ref} className="wave" />;
+}
+
+function Structure({ song, up, tl, play, clock }) {
+  const form = M.songForm(song);
+  const auto = !Array.isArray(song.form) || !song.form.length;
+  const [adding, setAdding] = useState(false);
+  const setForm = (f) => up((s) => { s.form = f; });
+  const move = (i, d) => { const f = [...form]; const j = i + d; if (j < 0 || j >= f.length) return; [f[i], f[j]] = [f[j], f[i]]; setForm(f); };
+  const secs = tl.bars.length * 16 * s16(song.bpm);
+  const curFi = clock?.active ? tl.lines[clock.active.line]?.fi : -1;
+  const name = (bi) => { const b = song.blocks[bi]; const lab = M.localLabel(b.label); const ty = tx(TYPES[b.type]); return lab ? (lab.toLowerCase().startsWith(ty.toLowerCase()) ? lab : `${lab} · ${ty}`) : ty; };
+  const playFi = (fi) => { const L = tl.lines.filter((l) => l.fi === fi); if (L.length) play({ from: L[0].b0, to: L[L.length - 1].b0 + L[L.length - 1].bars }); };
+  return (
+    <div className="card struct">
+      <h3><Ico n="measure" s={28} /> {tx("Structure de la chanson")}<span className="sp" />
+        <button className={'btn sm' + (auto ? ' pri' : '')} onClick={() => setForm(null)} title={tx('Retour automatique au refrain après chaque couplet')}><Ic n="loop" /> Auto</button>
+      </h3>
+      <div className="hint" style={{ marginBottom: 8 }}>{tx('La chanson complète, dans l’ordre joué : {n} sections · ≈ {d}. Le refrain revient après chaque couplet; déplace, ajoute ou enlève des sections.', { n: form.length, d: `${Math.floor(secs / 60)} min ${String(Math.round(secs % 60)).padStart(2, '0')} s` })}</div>
+      <div className="struct-list">
+        {form.map((bi, i) => (
+          <div key={i} className={'struct-row ' + (song.blocks[bi]?.type || '') + (curFi === i ? ' live' : '')}>
+            <span className="struct-n">{i + 1}</span>
+            <button className="grow struct-name" onClick={() => playFi(i)}><Ic n="play" size={13} fill="currentColor" /> {name(bi)}</button>
+            <button className="mini" onClick={() => move(i, -1)} disabled={!i} aria-label={tx('Monter')}>↑</button>
+            <button className="mini" onClick={() => move(i, 1)} disabled={i === form.length - 1} aria-label={tx('Descendre')}>↓</button>
+            <button className="mini" onClick={() => setForm(form.filter((_, j) => j !== i))} disabled={form.length < 2} aria-label={tx('Enlever')}>×</button>
+          </div>
+        ))}
+      </div>
+      {!adding ? <button className="btn wide" style={{ marginTop: 8 }} onClick={() => setAdding(true)}><Ic n="plus" /> {tx('Ajouter une section')}</button> : (
+        <div className="chips" style={{ marginTop: 8 }}>
+          {song.blocks.map((b, bi) => <button key={bi} className="chip" onClick={() => { setForm([...form, bi]); setAdding(false); }}>{name(bi)}</button>)}
+          <button className="chip" onClick={() => setAdding(false)}>×</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Arrangement({ song, up, preload, onFull }) {
@@ -1441,13 +1489,45 @@ function Karaoke({ song, tl, eng, playing, rec, onClose, onPlay, onRec }) {
   );
 }
 
-function SongsSheet({ song, load, close, say }) {
+function SongsSheet({ song, me, load, close, say }) {
   const [list, setList] = useState(null);
   const [arm, setArm] = useState(null);
+  const [withRec, setWithRec] = useState(true);
+  const [sharing, setSharing] = useState(false);
+  const fileIn = useRef(null);
+  const hasRec = song.tracks?.some((t) => t.data);
+  const doShare = async () => {
+    setSharing(true);
+    try {
+      const f = await songToFile(song, me, withRec);
+      const r = await shareFile(f, song.title, tx('Ouvre ce fichier dans Sonyria : Mes chansons → Ouvrir une chanson reçue · sonyria.vercel.app'));
+      if (r === 'downloaded') say(tx('Fichier {f} enregistré — envoie-le par courriel, texto ou Messenger', { f: f.name }));
+      else if (r === 'shared') say(tx('Chanson partagée'));
+    } catch (e) { say(tx('Partage impossible')); }
+    setSharing(false);
+  };
+  const openReceived = async (file) => {
+    if (!file) return;
+    try {
+      const { song: s, from } = await fileToSong(file);
+      const d = newSong(); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); close();
+      say(from ? tx('Chanson de {n} ouverte — elle est maintenant dans tes chansons', { n: from }) : tx('Chanson ouverte — elle est maintenant dans tes chansons'));
+    } catch (e) { say(tx('Ce fichier n’est pas une chanson Sonyria')); }
+  };
   const refresh = () => DB.listSongs().then(setList).catch(() => setList([]));
   useEffect(() => { refresh(); }, []);
   return <>
     <h3><Ico n="folder" s={28} /> {tx("Mes chansons")}</h3>
+    <div className="share-box">
+      <b><Ico n="share" s={22} /> {tx('Partager avec quelqu’un qui a Sonyria')}</b>
+      <div className="row" style={{ marginTop: 8 }}>
+        <button className="btn pri" disabled={sharing} onClick={doShare}>{sharing ? <span className="busy" /> : <Ico n="share" s={20} />} {tx('Partager « {t} »', { t: song.title || tx('Sans titre') })}</button>
+        <button className="btn" onClick={() => fileIn.current?.click()}><Ico n="upload" s={20} /> {tx('Ouvrir une chanson reçue')}</button>
+        <input ref={fileIn} type="file" accept=".sonyria,.json,application/octet-stream" hidden onChange={(e) => { openReceived(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
+      {hasRec && <label className="row" style={{ fontSize: 12.5, marginTop: 6 }}><input type="checkbox" checked={withRec} onChange={(e) => setWithRec(e.target.checked)} /> {tx('Inclure mes enregistrements de voix (fichier plus gros)')}</label>}
+      <div className="hint" style={{ marginTop: 6 }}>{tx('Tout est inclus : paroles, mélodie, accords, beat, instruments et structure. L’autre personne ouvre le fichier .sonyria dans son app et peut le modifier.')}</div>
+    </div>
     <div className="row" style={{ marginBottom: 10 }}>
       <button className="btn pri" onClick={() => { load(newSong('')); close(); }}>{tx("＋ Nouvelle chanson")}</button>
       {list?.length > 0 && <button className="btn" style={{ color: 'var(--pink)' }} onClick={async () => {
