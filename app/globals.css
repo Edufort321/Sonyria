@@ -652,3 +652,5 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .comp-tk button { padding: 4px 8px; font: 700 12px 'JetBrains Mono', monospace; }
 .comp-tk .pv { padding: 4px 6px; border-left: 1px solid var(--line); opacity: .8; }
 .comp-tk.on { border-color: var(--cyan); background: rgba(34,211,238,.18); box-shadow: 0 0 8px rgba(34,211,238,.4); }
+.fs { padding-top: 0; }
+body:has(.fs) { overflow: hidden; }

@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 41';
+const APP_VERSION = '2026.11.22 · 42';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -1057,18 +1057,9 @@ export default function Page() {
             {Object.keys(M.DRUM_PRESETS).map((k) => <button key={k} className="chip" onClick={() => up((s) => { const ex = {}; M.EXTRA_DRUMS.forEach((r) => { if (s.drums[r]) ex[r] = k === 'vide' ? Array(16).fill(0) : s.drums[r]; }); s.drums = { ...M.drumPreset(k), ...ex }; })}>{k === 'vide' ? <><Ic n="eraser" size={14} /> {tx("Vide")}</> : <><Ico n={M.STYLES[k]?.e} s={20} /> {tx(M.STYLES[k]?.n || k)}</>}</button>)}
           </div>
   );
-  const openFs = (k) => {
-    setFs(k);
-    try { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().then(() => { if (k !== 'arr') screen.orientation?.lock?.('landscape').catch(() => {}); }).catch(() => {}); } catch (e) {}
-  };
-  const closeFs = () => { setFs(null); try { screen.orientation?.unlock?.(); if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} };
-  const toggleFold = (ev) => {
-    const h = ev.target.closest('.card > h3'); if (!h || h.closest('.fs, .sheet, .kara, .cam')) return;
-    if (ev.target.closest('button, input, select, label, a, textarea') && !ev.target.closest('.fold-btn')) return;
-    const k = h.dataset.fk; if (!k) return;
-    const nx = { ...folds, [k]: !h.parentElement.classList.contains('folded') };
-    setFolds(nx); try { localStorage.setItem('sonyria-folds', JSON.stringify(nx)); } catch (e) {}
-  };
+  // plein écran dans l'app seulement (le plein écran du navigateur affichait un message « toucher pour sortir » qui restait à l'écran)
+  const openFs = (k) => { setFs(k); window.scrollTo({ top: 0 }); };
+  const closeFs = () => { setFs(null); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} };
   const TABS = [['paroles', 'new', 'Paroles'], ['melodie', 'note', 'Mélodie'], ['beat', 'drumkit', 'Beat'], ['studio', 'studio-mic', 'Studio'], ['table', 'sliders', 'Table'], ['clip', 'spectrum', 'Clip']];
 
   return (
