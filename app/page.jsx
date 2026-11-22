@@ -6,6 +6,7 @@ import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOIC
 import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
+import { imageToJpeg, toB64, docxText } from '@/lib/importText';
 import * as DB from '@/lib/storage';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
@@ -93,6 +94,8 @@ export default function Page() {
   const [compact, setCompact] = useState(false);
   const [hum, setHum] = useState({ mode: 'hum', metro: true, onLyrics: true, keepKey: false, instr: 'piano' });
   const [humRec, setHumRec] = useState(false);
+  const [ocr, setOcr] = useState(null);
+  const [ocrFix, setOcrFix] = useState(true);
   const humInfo = useRef(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
@@ -252,6 +255,41 @@ export default function Page() {
       if (opts.length) { setAmb(opts); setAmbSel(-1); }
     } catch (e) { say(e.message); }
     setBusy('');
+  };
+  // Dépôt de compositions : photos de manuscrits, PDF, Word, texte
+  const importCompositions = async (files) => {
+    files = [...files]; if (!files.length) return;
+    const imgs = files.filter((f) => f.type.startsWith('image/'));
+    const pdf = files.find((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+    const docx = files.find((f) => /\.docx$/i.test(f.name));
+    const txt = files.find((f) => f.type.startsWith('text/') || /\.(txt|md|rtf)$/i.test(f.name));
+    setBusy('ocr');
+    try {
+      if (txt && !imgs.length && !pdf && !docx) {
+        const t = (await txt.text()).replace(/\{\\[^}]*\}|\\[a-z]+\d* ?/g, '').trim();
+        setOcr({ lyrics: t, title: txt.name.replace(/\.[^.]+$/, ''), note: '' });
+      } else if (docx && !imgs.length && !pdf) {
+        setOcr({ lyrics: await docxText(docx), title: docx.name.replace(/\.[^.]+$/, ''), note: '' });
+      } else if (pdf) {
+        if (pdf.size > 3_000_000) throw new Error(tx('PDF trop lourd (3 Mo max). Envoie plutôt des photos des pages.'));
+        setProgress(tx('Claude lit ton document…'));
+        const d = await ai('ocr', { kind: 'pdf', pdf: await toB64(pdf), correct: ocrFix });
+        setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
+      } else {
+        setProgress(tx('Préparation des photos…'));
+        const images = [];
+        for (const f of imgs.slice(0, 8)) images.push(await imageToJpeg(f, imgs.length > 3 ? 1500 : 1800));
+        setProgress(tx('Claude lit ton écriture… ({n} page(s))', { n: images.length }));
+        const d = await ai('ocr', { kind: 'images', images, correct: ocrFix });
+        setOcr({ lyrics: String(d.lyrics || '').replace(/\\n/g, '\n'), title: d.title || '', note: d.note || '' });
+      }
+    } catch (e) { say(e.message === 'docx' ? tx('Fichier Word illisible') : e.message); }
+    setProgress(''); setBusy('');
+  };
+  const useOcr = (append) => {
+    const text = append && song.lyrics.trim() ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
+    if (ocr.title && (!append || !song.lyrics.trim())) up((s) => (s.title = ocr.title));
+    analyze(text); setOcr(null); say(tx('Paroles importées'));
   };
   const aiPolish = async () => {
     setBusy('polish');
@@ -641,6 +679,26 @@ export default function Page() {
             <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder={tx("Titre de la chanson")} />
             <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder={tx("Artiste")} style={{ maxWidth: 160 }} />
           </div>
+          <div className="dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); importCompositions(e.dataTransfer.files); }}>
+            <div className="dz-t"><Ico n="upload" s={30} /><div><b>{tx('Dépose tes compositions')}</b><small>{tx('Photo d’un cahier ou d’une feuille manuscrite, PDF, Word ou texte')}</small></div></div>
+            {busy === 'ocr' ? <div className="row"><span className="busy" /> {progress || tx('Lecture…')}</div> : <div className="row">
+              <label className="btn sm pri"><Ic n="camera" /> {tx('Prendre en photo')}<input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
+              <label className="btn sm"><Ic n="file" /> {tx('Importer des fichiers')}<input type="file" accept="image/*,.pdf,.txt,.md,.docx,text/plain,application/pdf" multiple hidden onChange={(e) => { importCompositions(e.target.files); e.target.value = ''; }} /></label>
+            </div>}
+            <label className="row" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={ocrFix} onChange={(e) => setOcrFix(e.target.checked)} /> {tx('Corriger le français en même temps (manuscrits et PDF)')}</label>
+            <div className="hint">{tx('Plusieurs pages ? Sélectionne toutes les photos d’un coup, dans l’ordre.')}</div>
+          </div>
+          {ocr && <div className="card" style={{ borderColor: 'var(--cyan)' }}>
+            <h3><Ico n="new" s={26} /> {tx('Texte importé')}</h3>
+            {ocr.note && <div className="hint">{ocr.note}</div>}
+            {ocr.title && <div className="hint">{tx('Titre')} : <b style={{ color: 'var(--txt)' }}>{ocr.title}</b></div>}
+            <textarea value={ocr.lyrics} onChange={(e) => setOcr({ ...ocr, lyrics: e.target.value })} style={{ minHeight: 200 }} />
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn pri" onClick={() => useOcr(false)}><Ic n="check" /> {tx('Remplacer mes paroles')}</button>
+              <button className="btn" onClick={() => useOcr(true)}><Ic n="plus" /> {tx('Ajouter à la suite')}</button>
+              <button className="btn" onClick={() => setOcr(null)}>{tx('Annuler')}</button>
+            </div>
+          </div>}
           <label className="f">{tx("Tes paroles")}</label>
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>

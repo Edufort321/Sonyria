@@ -5,7 +5,7 @@ import {
   FolderOpen, Pointer, Piano, Dices, Crosshair, SlidersHorizontal, SlidersVertical, Settings, RotateCcw, Eraser, Images, Feather,
   Droplet, Flame, Bell, Volume2, HeadphoneOff, Repeat, FileDown, Share2, ClipboardCopy, FolderPlus, Disc3, Guitar, AudioLines,
   Palette, Film, Moon, Sun, ChevronUp, ChevronDown, ArrowLeftToLine, ArrowRightToLine, Headphones, Heart, Zap, Coffee, TreePalm,
-  Radio, Waves, Download, Upload, Wand2, UserRound, ChevronRight, ChevronLeft, Plus, Smartphone, ShieldCheck, Mic2, Leaf, Activity,
+  Radio, Waves, Download, Upload, Wand2, UserRound, ChevronRight, ChevronLeft, Plus, Smartphone, ShieldCheck, Mic2, Leaf, Activity, Camera, FileText,
 } from 'lucide-react';
 
 const MAP = {
@@ -16,7 +16,7 @@ const MAP = {
   import: FileDown, share: Share2, copy: ClipboardCopy, add: FolderPlus, disc: Disc3, guitar: Guitar, wave: AudioLines, palette: Palette,
   film: Film, moon: Moon, sun: Sun, up: ChevronUp, down: ChevronDown, left: ArrowLeftToLine, right: ArrowRightToLine, headphones: Headphones,
   heart: Heart, zap: Zap, coffee: Coffee, palm: TreePalm, radio: Radio, waves: Waves, download: Download, upload: Upload, wand: Wand2,
-  user: UserRound, next: ChevronRight, prev: ChevronLeft, plus: Plus, phone: Smartphone, shield: ShieldCheck, mic2: Mic2, leaf: Leaf, pulse: Activity,
+  user: UserRound, next: ChevronRight, prev: ChevronLeft, plus: Plus, phone: Smartphone, shield: ShieldCheck, mic2: Mic2, leaf: Leaf, pulse: Activity, camera: Camera, file: FileText,
 };
 
 export default function Ic({ n, size = 18, g = false, fill, style, className = '' }) {

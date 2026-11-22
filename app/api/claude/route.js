@@ -29,6 +29,18 @@ Réponds UNIQUEMENT avec ce JSON : {"options":[{"style":"pop","mode":"maj","key"
 Paroles :
 ${p.lyrics}`;
   }
+  if (task === 'ocr') {
+    return `Tu reçois ${p.kind === 'pdf' ? 'un document PDF' : 'des photos de pages (dans l’ordre)'} contenant des paroles de chanson, souvent écrites à la main.
+Transcris les paroles de toutes les pages, dans l’ordre.
+- Garde le titre, les en-têtes de sections (Couplet 1, Refrain, Pont, Fin…) et les indications de l’auteur entre parenthèses (tout doucement, plus puissant, très émouvant…).
+- Ignore le texte barré et le texte qui transparaît du verso de la feuille (écriture à l’envers, pâle).
+- Mets chaque en-tête entre crochets, ex. [Couplet 1], [Refrain (plus puissant)], [Pont (tout doucement)], et laisse une ligne vide entre les sections.
+- Coupe le texte en vers chantables (une phrase musicale par ligne, environ 6 à 12 syllabes).
+${p.correct ? '- Corrige aussi l’orthographe, les accords et la grammaire dans la langue des paroles, et ajuste légèrement une tournure seulement si elle se chante mal. Garde la voix et le sens de l’auteur.' : '- Ne corrige pas les mots : recopie fidèlement ce qui est écrit (tu peux seulement ajouter la ponctuation des fins de vers).'}
+- Si un mot est illisible, mets ta meilleure lecture suivie de (?).
+Réponds UNIQUEMENT avec ce JSON :
+{"title":"titre de la chanson ou chaîne vide","lyrics":"texte complet avec \\n entre les lignes","note":"une phrase : nombre de pages lues et ce qui était difficile à lire"}`;
+  }
   if (task === 'polish') {
     return `Tu es parolier et correcteur. Voici des paroles de chanson écrites à la main (souvent sans ponctuation, avec des fautes).
 Ta mission :
@@ -96,14 +108,22 @@ export async function POST(req) {
   try { body = await req.json(); } catch { return Response.json({ error: 'Requête invalide' }, { status: 400 }); }
   const { task, payload } = body || {};
   const raw = JSON.stringify(payload || {});
-  if (raw.length > 40000) return Response.json({ error: 'Texte trop long' }, { status: 413 });
-  const content = prompt(task, payload || {});
-  if (!content) return Response.json({ error: 'Tâche inconnue' }, { status: 400 });
+  if (raw.length > (task === 'ocr' ? 4_300_000 : 40000)) return Response.json({ error: 'Fichier trop lourd / File too large' }, { status: 413 });
+  const text = prompt(task, payload || {});
+  if (!text) return Response.json({ error: 'Tâche inconnue' }, { status: 400 });
+  let content = text;
+  if (task === 'ocr') {
+    const blocks = [];
+    if (payload.kind === 'pdf') blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: payload.pdf } });
+    else (payload.images || []).slice(0, 8).forEach((im) => blocks.push({ type: 'image', source: { type: 'base64', media_type: im.type || 'image/jpeg', data: im.data } }));
+    if (!blocks.length) return Response.json({ error: 'Aucun fichier / No file' }, { status: 400 });
+    content = [...blocks, { type: 'text', text }];
+  }
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' || task === 'polish' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: task === 'compose' || task === 'polish' || task === 'ocr' ? 8000 : 2000, messages: [{ role: 'user', content }] }),
     });
     const j = await r.json();
     if (!r.ok) return Response.json({ error: j?.error?.message || 'Erreur Anthropic' }, { status: r.status });
