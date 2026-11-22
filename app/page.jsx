@@ -4,7 +4,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
 import { KITS } from '@/lib/samples';
-import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer } from '@/lib/arrange';
+import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer, REAL, isReal } from '@/lib/arrange';
 import { LOOKS, OVERLAYS, SPECTRA, TEXT_STYLES } from '@/lib/video';
 import { ClipRenderer, THEMES, THEME_CATS, FORMATS, PLATFORMS, defaultScenario, loadImage, currentLine } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
@@ -342,7 +342,8 @@ export default function Page() {
   const onLyrics = (text) => { song.lyrics = text; bump(); clearTimeout(lyricsT.current); lyricsT.current = setTimeout(() => analyze(text), 700); };
   const chooseAmb = async (a, i) => {
     setAmbSel(i);
-    up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; M.composeSong(s, s.variant); });
+    up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; if (a.layers?.some((l) => l.role === 'melody')) s.layers = a.layers.map((l) => newLayer(l.role, l.inst, l.vol)); M.composeSong(s, s.variant); });
+    try { const e = await ensureAudio(); prepareSamples(e.ctx, song); } catch (err) {}
     if (aiStatus?.ai) { await aiCompose(true); }
     play({ from: 0, to: Math.min(buildTimeline(song).bars.length, (song.intro ? 2 : 0) + 8), loop: false });
     say(tx('Extrait de 8 mesures. Touche ▶ en bas pour écouter toute la chanson.'));
@@ -361,7 +362,8 @@ export default function Page() {
     try {
       const d = await ai('ambiance', { lyrics: song.lyrics });
       setAmbRead(d.reading || '');
-      const opts = (d.options || []).filter((o) => M.STYLES[o.style]).map((o) => ({ style: o.style, mode: o.mode === 'min' ? 'min' : 'maj', key: M.mod(Math.round(+o.key || 0), 12), bpm: clamp(Math.round(+o.bpm || 100), 60, 180), why: o.why || '', ai: true }));
+      const okL = (l) => l && ROLES[l.role] && (REAL[l.role] || ROLES[l.role].insts).includes(l.inst);
+      const opts = (d.options || []).filter((o) => M.STYLES[o.style]).map((o) => ({ style: o.style, mode: o.mode === 'min' ? 'min' : 'maj', key: M.mod(Math.round(+o.key || 0), 12), bpm: clamp(Math.round(+o.bpm || 100), 60, 180), why: o.why || '', ai: true, layers: (o.layers || []).filter(okL).slice(0, 7).map((l) => ({ role: l.role, inst: l.inst, vol: clamp(+l.vol || 0.8, 0.2, 1.2) })) }));
       if (opts.length) { setAmb(opts); setAmbSel(-1); }
     } catch (e) { say(e.message); }
     setBusy('');
@@ -1063,6 +1065,7 @@ export default function Page() {
                 <div className="t"><Ico n={M.STYLES[a.style].e} s={26} /> {tx(M.STYLES[a.style].n)}</div>
                 <div className="m">{a.bpm} BPM · {(getLang() === 'en' ? M.NOTE_EN : M.NOTE_FR)[a.key]} {tx(a.mode === 'maj' ? 'majeur' : 'mineur')}</div>
                 <div className="w">{a.ai ? a.why : a.why.split(' · ').map((x, i) => (i ? tx(' · ' + x) : tx(x))).join('')}</div>
+                {a.layers?.length > 0 && <div className="amb-ins">{a.layers.map((l, k) => <Ico key={k} n={instIcon(l.role, l.inst)} s={20} />)}</div>}
               </button>
             ))}
           </div>
@@ -1937,13 +1940,14 @@ function Arrangement({ song, up, preload, onFull }) {
         <button className="btn sm" onClick={() => { up((s) => { s.layers = defaultLayers(s); }); preload(); }} title={tx('Remettre l’arrangement du style')}><Ic n="undo" /></button>
         {onFull && <button className="btn sm pri" onClick={onFull} aria-label={tx('Plein écran')}><Ic n="max" /></button>}
       </h3>
-      <div className="hint" style={{ marginBottom: 8 }}>{tx('Instruments de la proposition. Ajoute, enlève ou dose chaque instrument, même pendant que ça joue.')}</div>
+      <div className="hint" style={{ marginBottom: 8 }}>{tx('Instruments de la proposition. Ajoute, enlève ou dose chaque instrument, même pendant que ça joue.')} {tx('✓ = vrai instrument enregistré.')}</div>
+      <label className="row nw" style={{ fontSize: 12.5, marginBottom: 8 }}><input type="checkbox" checked={song.realFirst !== false} onChange={(e) => { const on = e.target.checked; up((s) => { s.realFirst = on; s.layers = defaultLayers(s); }); preload(); }} /> {tx('Sons réels en priorité (vrais instruments enregistrés)')}</label>
       {layers.map((l) => (
         <div key={l.id} className={'arr-row' + (l.on === false ? ' off' : '')}>
           <button className="arr-ico" onClick={() => edit(l.id, (x) => (x.on = x.on === false))} title={l.on === false ? tx('Activer') : tx('Couper')}><Ico n={instIcon(l.role, l.inst)} s={34} dim={l.on === false} /></button>
           <div className="arr-main">
             <select value={l.inst} onChange={(e) => { edit(l.id, (x) => (x.inst = e.target.value)); preload(); }}>
-              {ROLES[l.role].insts.map((i) => <option key={i} value={i}>{tx(instName(l.role, i))}</option>)}
+              {ROLES[l.role].insts.map((i) => <option key={i} value={i}>{tx(instName(l.role, i))}{isReal(l.role, i) ? ' ✓' : ' (' + tx('synthé') + ')'}</option>)}
             </select>
             <div className="arr-vol">
               <small>{tx(ROLES[l.role].n)}</small>
@@ -1961,7 +1965,7 @@ function Arrangement({ song, up, preload, onFull }) {
           <div className="chips" style={{ marginTop: 8 }}>
             {adding === 'role'
               ? Object.entries(ROLES).map(([r, d]) => <button key={r} className="chip" onClick={() => setAdding(r)}><Ico n={d.icon} s={20} /> {tx(d.n)}</button>)
-              : ROLES[adding].insts.map((i) => <button key={i} className="chip" onClick={() => { const r = adding; up((s) => ensureLayers(s).push(newLayer(r, i, 0.8))); setAdding(null); preload(); }}><Ico n={instIcon(adding, i)} s={20} /> {tx(instName(adding, i))}</button>)}
+              : ROLES[adding].insts.map((i) => <button key={i} className={'chip' + (isReal(adding, i) ? ' realc' : '')} onClick={() => { const r = adding; up((s) => ensureLayers(s).push(newLayer(r, i, 0.8))); setAdding(null); preload(); }}><Ico n={instIcon(adding, i)} s={20} /> {tx(instName(adding, i))}</button>)}
           </div>
         </div>
       )}
@@ -2101,7 +2105,9 @@ function Mixer({ song, up, eng, playing, onFull }) {
     <div className="card">
       <h3><Ico n="mixer" s={28} /> {tx("Table de son")}<span className="sp" />{onFull && <button className="btn sm pri" onClick={onFull}><Ic n="max" /> {tx('Plein écran')}</button>}</h3>
       <div className="console">
-        {strips.map(([k, n, i]) => <Strip key={k} name={tx(n)} icon={i} val={m[k]} meter={lv[k]} set={(x) => up((s) => (s.mix[k] = x))} mute={m.mute[k]} solo={m.solo[k]}
+        {ensureLayers(song).map((l) => <Strip key={l.id} name={tx(instName(l.role, l.inst))} icon={instIcon(l.role, l.inst)} val={l.vol ?? 1} meter={lv[ROLE_METER[l.role]]} real={isReal(l.role, l.inst)} set={(x) => up((s) => { const y = ensureLayers(s).find((z) => z.id === l.id); if (y) y.vol = x; })} mute={l.on === false}
+          onMute={() => up((s) => { const y = ensureLayers(s).find((z) => z.id === l.id); if (y) y.on = y.on === false; })} />)}
+        {strips.filter(([k]) => k === 'tracks').map(([k, n, i]) => <Strip key={k} name={tx(n)} icon={i} val={m[k]} meter={lv[k]} set={(x) => up((s) => (s.mix[k] = x))} mute={m.mute[k]} solo={m.solo[k]}
           onMute={() => up((s) => (s.mix.mute[k] = !s.mix.mute[k]))} onSolo={() => up((s) => (s.mix.solo[k] = !s.mix.solo[k]))} />)}
         {song.tracks.map((t) => <Strip key={t.id} name={t.name} icon="voice-wave" val={t.vol} meter={lv['tr_' + t.id]} set={(x) => up((s) => (s.tracks.find((y) => y.id === t.id).vol = x))} mute={t.mute} solo={t.solo}
           onMute={() => up((s) => { const y = s.tracks.find((z) => z.id === t.id); y.mute = !y.mute; })} onSolo={() => up((s) => { const y = s.tracks.find((z) => z.id === t.id); y.solo = !y.solo; })}
@@ -2109,6 +2115,7 @@ function Mixer({ song, up, eng, playing, onFull }) {
         <Strip name={tx("Master")} icon="speaker" val={m.master} meter={lv.master} set={(x) => up((s) => (s.mix.master = x))} />
       </div>
       {!playing && <div className="hint" style={{ marginTop: 8 }}>{tx("Lance la lecture pour voir les vumètres bouger.")}</div>}
+      <div className="hint" style={{ marginTop: 6 }}>{tx('Une tranche par instrument de ton arrangement. Pour ajouter ou changer un instrument : onglet Mélodie → Arrangement.')}</div>
       <label className="f">{tx('Mastering (son final)')}</label>
       <div className="chips">{[['naturel', 'Naturel'], ['radio', 'Radio (fort et clair)'], ['basses', 'Plus de basses'], ['doux', 'Doux et chaud'], ['live', 'Live']].map(([k, n]) => <button key={k} className={'chip' + ((m.preset || 'naturel') === k ? ' on' : '')} onClick={() => up((s) => (s.mix.preset = k))}>{tx(n)}</button>)}</div>
       <div className="hint">{tx('S’applique à l’écoute et aux exports (WAV, MP4, clip). Un limiteur évite que ça sature.')}</div>
@@ -2122,18 +2129,20 @@ function Mixer({ song, up, eng, playing, onFull }) {
   </>;
 }
 
-function Strip({ name, icon, val, set, mute, solo, onMute, onSolo, meter, extra }) {
+const ROLE_METER = { drums: 'drums', bass: 'bass', chords: 'chords', pad: 'chords', arp: 'chords', melody: 'lead', harmony: 'harm' };
+function Strip({ name, icon, val, set, mute, solo, onMute, onSolo, meter, extra, real }) {
   return (
     <div className="strip">
       <div className="sico"><Ico n={icon} s={34} /></div>
       <div className="snm">{name}</div>
+      {real && <span className="real-tag">{tx('réel')}</span>}
       {extra}
       <div className="fader">
         <div className="vu"><i style={{ height: Math.min(100, (meter || 0) * 160) + '%' }} /></div>
         <input type="range" min="0" max="1.2" step="0.01" value={val} onChange={(e) => set(+e.target.value)} />
       </div>
       <div className="sval">{Math.round(val * 100)}</div>
-      {onMute && <div className="row nw" style={{ gap: 4 }}><button className="imgtgl" onClick={onMute} aria-label={tx("Muet")}><Ico n="mute-m" s={30} dim={!mute} /></button><button className="imgtgl" onClick={onSolo} aria-label={tx("Solo")}><Ico n="solo" s={30} dim={!solo} /></button></div>}
+      {onMute && <div className="row nw" style={{ gap: 4 }}><button className="imgtgl" onClick={onMute} aria-label={tx("Muet")}><Ico n="mute-m" s={30} dim={!mute} /></button>{onSolo && <button className="imgtgl" onClick={onSolo} aria-label={tx("Solo")}><Ico n="solo" s={30} dim={!solo} /></button>}</div>}
     </div>
   );
 }

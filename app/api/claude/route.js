@@ -26,7 +26,8 @@ Propose 4 ambiances musicales différentes qui servent ce texte précis.
 Styles permis : ${STYLES.join(', ')}. Tonalité "key" : entier 0-11 (0=Do, 2=Ré, 4=Mi, 5=Fa, 7=Sol, 9=La, 11=Si). "mode" : "maj" ou "min". "bpm" : 60-170 (adapte le tempo au débit des vers : vers longs = tempo plus posé).
 Pour chaque ambiance, "why" = une courte phrase qui explique le lien avec le texte en citant un mot ou une image des paroles.
 "reading" = 1 ou 2 phrases : ce que raconte la chanson et l'émotion de chaque grande section (ex. couplets intimes, refrain qui s'ouvre, pont fragile).
-Réponds UNIQUEMENT avec ce JSON : {"reading":"...","options":[{"style":"pop","mode":"maj","key":0,"bpm":104,"why":"..."}]}
+Pour chaque ambiance, choisis aussi l'orchestration "layers" (3 à 6 instruments) PRIORITAIREMENT avec de vrais instruments enregistrés, parmi : batterie "drums" (acoustic, 808, linn), basse "bass" (bass, upright), accords "chords" (piano, epiano, pluck = guitare acoustique, nylon = guitare classique, eguitar, power = guitare saturée, strings, choir), nappe "pad" (strings, choir, epiano), arpèges "arp" (piano, epiano, nylon, pluck, eguitar), mélodie "melody" (voix = chœur, piano, sax, altosax, trumpet, flute, guitar, nylon, strings). "vol" entre 0.3 et 1. Pas de batterie pour une ambiance très intime si le texte le demande.
+Réponds UNIQUEMENT avec ce JSON : {"reading":"...","options":[{"style":"pop","mode":"maj","key":0,"bpm":104,"why":"...","layers":[{"role":"drums","inst":"acoustic","vol":1},{"role":"chords","inst":"piano","vol":0.9},{"role":"melody","inst":"voix","vol":1}]}]}
 
 Paroles :
 ${p.lyrics}`;
