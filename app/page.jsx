@@ -340,7 +340,7 @@ export default function Page() {
           n++;
         });
       });
-      setAiNote(d.note || ''); say(tx('Claude a composé {n} ligne(s)', { n }));
+      setAiNote(d.note || ''); say(tx('Sonyria a composé {n} ligne(s)', { n }));
       setTab('melodie');
     } catch (e) { say(e.message); }
     setBusy('');
@@ -715,7 +715,7 @@ export default function Page() {
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Claude")}</>}</button>
+            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
@@ -744,7 +744,7 @@ export default function Page() {
         {guide.on && me?.onboarded && GUIDE[guide.step]?.anchor === 'g-amb' && <div id="g-amb-guide"><GuideCard step={guide.step} go={goStep} hide={() => saveGuide({ ...guide, on: false })} /></div>}
         <div className="card" id="g-amb">
           <h3><Ico n="headphones-wave" s={28} /> {tx("Ambiances proposées")}<span className="sp" />
-            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <Magic kind="amb" /> : <><Ic n="sparkles" /> {tx('Demander à Claude')}</>}</button>
+            <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <Magic kind="amb" /> : <><Ic n="sparkles" /> {tx('Demander à Sonyria')}</>}</button>
           </h3>
           <div className="amb">
             {amb.map((a, i) => (
@@ -779,8 +779,8 @@ export default function Page() {
         <div className="card">
           <button className="btn pri wide" onClick={() => { setTab('melodie'); play({ from: 0 }); }}><Ic n="play" /> {tx("Écouter l’arrangement")}</button>
           <div style={{ height: 8 }} />
-          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <Magic kind="compose" /> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Claude")}</>}</button>
-          <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Claude choisir aussi le style, la tonalité et le tempo")}</label>
+          <button className="btn ai wide" disabled={!!busy || aiStatus?.ai === false} onClick={aiCompose}>{busy === 'compose' ? <Magic kind="compose" /> : <><Ic n="sparkles" /> {tx("Composer la mélodie avec Sonyria")}</>}</button>
+          <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Sonyria choisir aussi le style, la tonalité et le tempo")}</label>
           {aiStatus?.ai === false && <div className="hint">{tx("IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.")}</div>}
         </div>
       </>}
@@ -1002,7 +1002,7 @@ export default function Page() {
             <label className="btn"><Ic n="images" /> {tx("Mes photos")}<input type="file" accept="image/*" multiple hidden onChange={async (e) => { photos.current = (await Promise.all([...e.target.files].slice(0, 12).map(loadImage))).filter(Boolean); bump(); say(tx('{n} photo(s) ajoutée(s)', { n: photos.current.length })); }} /></label>
             {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}><Ic n="undo" /> {tx("Thème simple")}</button>}
           </div>
-          <div className="hint" style={{ marginTop: 8 }}>{tx("Claude écrit le scénario : un thème, des couleurs et des mots-clés par section. L’animation suit le son et les paroles s’affichent en karaoké. Tes photos défilent en fond, une par ligne.")}</div>
+          <div className="hint" style={{ marginTop: 8 }}>{tx("Sonyria écrit le scénario : un thème, des couleurs et des mots-clés par section. L’animation suit le son et les paroles s’affichent en karaoké. Tes photos défilent en fond, une par ligne.")}</div>
         </div>
         <div className="card">
           <h3><Ico n="share" s={28} /> {tx("Exporter")}</h3>
@@ -1017,7 +1017,7 @@ export default function Page() {
             <button className="btn" onClick={() => exportLive(false)}><Ico n="disc-note" s={22} /> {tx("Audio MP4")}</button>
             <button className="btn" onClick={exportWav}><Ico n="wav" s={22} /> {tx("WAV studio")}</button>
           </div></>}
-          <div className="hint" style={{ marginTop: 8 }}>{tx("Clip MP4 en H.264 + AAC, 1080p, 30 images/s : prêt pour TikTok, Reels, Shorts et YouTube. 30 s et 60 s partent du 1er refrain. L’export se fait en temps réel ; le WAV (chanson complète) est instantané. Les sons de Sonyria sont générés par l’app, donc libres de droits.")}</div>
+          <div className="hint" style={{ marginTop: 8 }}>{tx("Clip MP4 en H.264 + AAC, 1080p, 30 images/s : prêt pour TikTok, Reels, Shorts et YouTube. 30 s et 60 s partent du 1er refrain. L’export se fait en temps réel ; le WAV (chanson complète) est instantané. Les instruments sont de vrais enregistrements sous licences libres (voir Réglages › Crédits).")}</div>
         </div>
       </>}
 
@@ -1195,9 +1195,9 @@ function PrintView({ song, me, onClose }) {
 }
 
 const GUIDE = [
-  { tab: 'paroles', anchor: 'g-lyrics', t: 'Tes paroles', d: 'Écris ou colle ton texte, ou dépose une photo de ton cahier, un PDF ou un fichier Word. Mets [Couplet], [Refrain] ou [Pont] au-dessus de chaque bloc. Le bouton « Corriger avec Claude » corrige l’orthographe sans toucher à tes mots.' },
+  { tab: 'paroles', anchor: 'g-lyrics', t: 'Tes paroles', d: 'Écris ou colle ton texte, ou dépose une photo de ton cahier, un PDF ou un fichier Word. Mets [Couplet], [Refrain] ou [Pont] au-dessus de chaque bloc. Le bouton « Corriger avec Sonyria » corrige l’orthographe sans toucher à tes mots.' },
   { tab: 'paroles', anchor: 'g-amb', t: 'L’ambiance', d: 'Touche une des ambiances proposées : tu entends tout de suite un extrait. Tu peux aussi choisir toi-même le style, la tonalité et le tempo juste en dessous.' },
-  { tab: 'melodie', anchor: null, t: 'La mélodie', d: 'Écoute les propositions A, B, C, D ou demande une mélodie à Claude. Touche un accord pour le changer, ou une syllabe pour monter, descendre ou allonger sa note. Le bouton Partition imprime le tout.' },
+  { tab: 'melodie', anchor: null, t: 'La mélodie', d: 'Écoute les propositions A, B, C, D ou demande une mélodie à Sonyria. Touche un accord pour le changer, ou une syllabe pour monter, descendre ou allonger sa note. Le bouton Partition imprime le tout.' },
   { tab: 'beat', anchor: null, t: 'Le beat', d: 'Choisis la batterie (acoustique, TR-808, LinnDrum), ajuste le tempo et touche les cases de la grille pour créer ton rythme.' },
   { tab: 'studio', anchor: null, t: 'Enregistrer', d: 'Mets des écouteurs, puis enregistre ta voix avec le karaoké qui défile. Tu peux aussi fredonner une mélodie : Sonyria la transcrit et ajoute la musique.' },
   { tab: 'table', anchor: null, t: 'Le mixage', d: 'Monte ou baisse chaque instrument et ta voix avec les faders. Ajoute de l’écho et de la réverb à ta voix dans le Studio.' },
