@@ -603,3 +603,10 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .ontop { margin-top: 10px; padding: 10px; border-radius: 12px; background: rgba(168,85,247,.07); border: 1px solid rgba(168,85,247,.3); }
 .chip.emo { font-size: 18px; padding: 4px 9px; }
 .struct-row.inst { border-left-color: var(--orange); background: rgba(251,146,60,.07); font-style: italic; }
+/* ===== barre de lecture du clip ===== */
+.seek { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.seek input[type=range] { flex: 1; min-width: 60px; accent-color: var(--cyan); }
+.seek .mini { font: 700 12px 'JetBrains Mono', monospace; min-width: 34px; }
+.seek .mini.pp { background: var(--grad); color: #fff; border-radius: 50%; width: 38px; height: 38px; }
+.seek-t { font: 600 11.5px 'JetBrains Mono', monospace; color: var(--dim); white-space: nowrap; }
+@media (max-width: 400px) { .seek-t { display: none; } }

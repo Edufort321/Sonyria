@@ -129,6 +129,8 @@ export default function Page() {
   const [cam, setCam] = useState(false);
   const [themeCat, setThemeCat] = useState(null);
   const [decor, setDecor] = useState('anim');
+  const [clipPos, setClipPos] = useState(0);
+  const clipPrev = useRef(null);
   const [folds, setFolds] = useState({});
   const [guide, setGuide] = useState({ on: false, step: 0 });
   const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
@@ -821,7 +823,9 @@ export default function Page() {
         if (vd._g) vd._g.gain.value = vs === 'app' ? 0 : 1;
       }
       const mOff = !!vd && vs === 'video'; if (e && e.musicOff !== mOff) { e.musicOff = mOff; e.applyLayers(song); }
-      renderer.current.draw(st && !st.countIn ? st.t : (tl.lines[0]?.syl[0]?.g || 0) * s16(song.bpm) + 0.8, tl, song, e?.playing ? freq : null);
+      const ct = st && !st.countIn ? st.t : clipPrev.current ?? (tl.lines[0]?.syl[0]?.g || 0) * s16(song.bpm) + 0.8;
+      renderer.current.draw(ct, tl, song, e?.playing ? freq : null);
+      if (Math.abs(ct - (f.last ?? -9)) > 0.25) { f.last = ct; setClipPos(ct); }
       raf = requestAnimationFrame(f);
     };
     f();
@@ -1275,6 +1279,18 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="spectrum" s={28} /> {tx("Vidéoclip animé")}</h3>
           <canvas ref={clipRef} className="clip-cv" />
+          {(() => {
+            const total = tl.steps * s16(song.bpm), fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
+            const seek = (x) => { const tt = clamp(x, 0, Math.max(0, total - 0.5)); clipPrev.current = tt; setClipPos(tt); if (playing) play({ from: tt / (16 * s16(song.bpm)) }); };
+            return <div className="seek">
+              <button className="mini" onClick={() => { clipPrev.current = 0; setClipPos(0); if (playing) play({ from: 0 }); }} aria-label={tx('Reprendre au début')}><Ic n="rewind" /></button>
+              <button className="mini" onClick={() => seek(clipPos - 5)} aria-label="-5 s">−5</button>
+              <button className="mini pp" onClick={() => (playing ? stop() : play({ from: (clipPrev.current ?? 0) / (16 * s16(song.bpm)) }))} aria-label={tx('Lecture')}>{playing ? <Ic n="pause" /> : <Ic n="play" />}</button>
+              <button className="mini" onClick={() => seek(clipPos + 5)} aria-label="+5 s">+5</button>
+              <input type="range" min="0" max={Math.max(1, total)} step="0.1" value={Math.min(clipPos, total)} onChange={(e) => { const x = +e.target.value; clipPrev.current = x; setClipPos(x); }} onPointerUp={(e) => seek(+e.currentTarget.value)} onKeyUp={(e) => seek(+e.currentTarget.value)} />
+              <span className="seek-t">{fmt(clipPos)} / {fmt(total)}</span>
+            </div>;
+          })()}
           <Sub k="clip-vid" t={tx('Ma vidéo : me filmer ou importer un clip')} open>
           <div className="vid-src">
             <button className="btn pri" onClick={() => setCam(true)}><Ico n="rec-button" s={22} /> {tx('Me filmer')}</button>
