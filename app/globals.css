@@ -505,3 +505,13 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .prompter .pl small { font: 600 10px 'JetBrains Mono', monospace; color: var(--cyan); text-transform: uppercase; letter-spacing: .08em; }
 .prompter .pl.now { color: #fff; font-size: 21px; text-shadow: 0 0 18px rgba(34,211,238,.6); }
 .prompter .pl.past { color: rgba(255,255,255,.25); }
+/* ===== étapes ===== */
+.steps .step { display: flex; align-items: center; gap: 10px; padding: 9px 8px; border-radius: 12px; opacity: .6; }
+.steps .step + .step { border-top: 1px solid var(--line); }
+.steps .step b { display: block; font-size: 14.5px; }
+.steps .step small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
+.steps .step .sn { width: 30px; height: 30px; flex: none; border-radius: 50%; display: grid; place-items: center; font: 700 14px 'JetBrains Mono', monospace; border: 2px solid var(--line); }
+.steps .step.done { opacity: .85; }
+.steps .step.done .sn { background: var(--grad); border-color: transparent; color: #fff; }
+.steps .step.on { opacity: 1; background: rgba(34,211,238,.08); box-shadow: inset 0 0 0 1px rgba(34,211,238,.4); }
+.steps .step.on .sn { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 12px rgba(34,211,238,.5); }

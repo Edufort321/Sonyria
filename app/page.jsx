@@ -16,6 +16,7 @@ import { loadCutout } from '@/lib/cutout';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
+const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
 Les lumières de la ville dansent dans la nuit
@@ -90,11 +91,11 @@ function activeAt(tl, song, t) {
 
 export default function Page() {
   const S = useRef(null);
-  if (!S.current) S.current = newSong();
+  if (!S.current) S.current = newSong('');
   const song = S.current;
   const [v, bump] = useReducer((x) => x + 1, 0);
   const [tab, setTabState] = useState('paroles');
-  const setTab = (t) => { setTabState(t); try { localStorage.setItem('sonyria-tab', t); } catch (e) {} };
+  const setTab = (t) => { setTabState(t); try { localStorage.setItem('sonyria-tab', t); } catch (e) {} const c = S.current; if (c?.lyrics?.trim() && !c.visited?.[t]) { c.visited = { ...(c.visited || {}), [t]: true }; } };
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
   const [kara, setKara] = useState(false);
@@ -205,6 +206,13 @@ export default function Page() {
   useEffect(() => {
     (async () => {
       try {
+        // remise à zéro unique (même pour l'app déjà installée) : on repart à vide
+        if (!localStorage.getItem('sonyria-reset-1')) {
+          try { const all = await DB.listSongs(); for (const x of all) await DB.deleteSong(x.id); } catch (e) {}
+          try { Object.keys(localStorage).filter((k) => k.startsWith('sonyria-') && k !== 'sonyria-lang').forEach((k) => localStorage.removeItem(k)); } catch (e) {}
+          localStorage.setItem('sonyria-reset-1', '1');
+          load(newSong(''));
+        }
         const id = localStorage.getItem('sonyria-current');
         setCode(localStorage.getItem('sonyria-code') || '');
         setMeState(loadMe());
@@ -217,8 +225,8 @@ export default function Page() {
         } catch (e) { setGuide({ on: true, step: 0 }); }
         try { const lt = localStorage.getItem('sonyria-tab'); if (lt && ['paroles', 'melodie', 'beat', 'studio', 'table', 'clip'].includes(lt)) setTab(lt); } catch (e) {}
         setLangState(initLang());
-        if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
-        if (typeof window !== 'undefined' && 'launchQueue' in window) window.launchQueue.setConsumer(async (p) => { const h = p.files?.[0]; if (!h) return; try { const { song: s } = await fileToSong(await h.getFile()); const d = newSong(); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); } catch (e) {} });
+        if (id) { const r = await DB.getSong(id); if (r?.song && !isDemo(r.song.lyrics)) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } else load(newSong('')); }
+        if (typeof window !== 'undefined' && 'launchQueue' in window) window.launchQueue.setConsumer(async (p) => { const h = p.files?.[0]; if (!h) return; try { const { song: s } = await fileToSong(await h.getFile()); const d = newSong(''); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); } catch (e) {} });
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
@@ -293,7 +301,7 @@ export default function Page() {
   const onLyrics = (text) => { song.lyrics = text; bump(); clearTimeout(lyricsT.current); lyricsT.current = setTimeout(() => analyze(text), 700); };
   const chooseAmb = (a, i) => {
     setAmbSel(i);
-    up((s) => { applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; M.composeSong(s, s.variant); });
+    up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; M.composeSong(s, s.variant); });
     play({ from: 0, to: Math.min(tl.bars.length, (song.intro ? 2 : 0) + 8), loop: false });
     say(tx('Extrait de 8 mesures. Touche ▶ en bas pour écouter toute la chanson.'));
   };
@@ -342,7 +350,7 @@ export default function Page() {
     setProgress(''); setBusy('');
   };
   const useOcr = (append) => {
-    const text = append && song.lyrics.trim() ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
+    const text = append && song.lyrics.trim() && !isDemo(song.lyrics) ? song.lyrics.trim() + '\n\n' + ocr.lyrics.trim() : ocr.lyrics.trim();
     if (ocr.title && (!append || !song.lyrics.trim())) up((s) => (s.title = ocr.title));
     analyze(text); setOcr(null); say(tx('Paroles importées'));
   };
@@ -856,6 +864,30 @@ export default function Page() {
           <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })} · {tx('durée')} ≈ {Math.floor(tl.steps * s16(song.bpm) / 60)} min {String(Math.round(tl.steps * s16(song.bpm) % 60)).padStart(2, '0')} s</div>
         </div>
 
+        {!song.lyrics?.trim() ? <div className="card steps">
+          <h3><Ic n="music" /> {tx('Pour commencer')}</h3>
+          <div className="step on"><span className="sn">1</span><div><b>{tx('Mets tes paroles')}</b><small>{tx('Colle ton texte ci-dessus, prends une photo de ta feuille ou importe un fichier. Sonyria garde tes mots tels quels.')}</small></div></div>
+          <div className="step"><span className="sn">2</span><div><b>{tx('Choisis ton style')}</b><small>{tx('Les styles et ambiances apparaissent dès que tes paroles sont là.')}</small></div></div>
+        </div> : <>
+        <div className="card steps">
+          <h3><Ic n="music" /> {tx('Tes étapes')}</h3>
+          {[
+            ['paroles', tx('Tes paroles'), tx('C’est fait ✓ — tu peux les modifier en tout temps.'), true],
+            ['style', tx('Choisis ton style'), tx('Touche une ambiance proposée ou un style juste en dessous : tu entends un extrait.'), !!song.styleChosen],
+            ['melodie', tx('Écoute et ajuste la mélodie'), tx('Structure, instruments, notes et accords.'), !!song.visited?.melodie],
+            ['beat', tx('Ajuste ton beat'), tx('Tempo, batterie et sons.'), !!song.visited?.beat],
+            ['studio', tx('Enregistre ta voix'), tx('Chante avec le karaoké, ou filme-toi.'), !!song.visited?.studio],
+            ['clip', tx('Fais ton vidéoclip'), tx('Thème, ta vidéo, export MP4.'), !!song.visited?.clip],
+          ].map(([k, t, d, done], i, arr) => {
+            const cur = !done && arr.slice(0, i).every((x) => x[3]);
+            return <div key={k} className={'step' + (done ? ' done' : '') + (cur ? ' on' : '')}>
+              <span className="sn">{done ? '✓' : i + 1}</span>
+              <div className="grow"><b>{t}</b><small>{d}</small></div>
+              {k === 'style' ? <button className="btn sm pri" onClick={() => document.getElementById('g-amb')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{tx('Choisir')}</button>
+                : k !== 'paroles' && <button className={'btn sm' + (cur ? ' pri' : '')} onClick={() => { setTab(k); window.scrollTo({ top: 0 }); }}>{tx('Aller')} →</button>}
+            </div>;
+          })}
+        </div>
         {guide.on && me?.onboarded && GUIDE[guide.step]?.anchor === 'g-amb' && <div id="g-amb-guide"><GuideCard step={guide.step} go={goStep} hide={() => saveGuide({ ...guide, on: false })} /></div>}
         <div className="card" id="g-amb">
           <h3><Ico n="headphones-wave" s={28} /> {tx("Ambiances proposées")}<span className="sp" />
@@ -877,7 +909,7 @@ export default function Page() {
           <h3><Ico n="note-purple" s={28} /> Style</h3>
           <div className="styles">
             {Object.entries(M.STYLES).map(([k, s]) => (
-              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { applyStyle(x, k); M.composeSong(x, x.variant); })}><b><Ico n={s.e} s={40} /></b>{tx(s.n)}</button>
+              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { x.styleChosen = true; applyStyle(x, k); M.composeSong(x, x.variant); })}><b><Ico n={s.e} s={40} /></b>{tx(s.n)}</button>
             ))}
           </div>
           <div className="row" style={{ marginTop: 12 }}>
@@ -898,6 +930,7 @@ export default function Page() {
           <label className="row" style={{ marginTop: 8, fontSize: 13 }}><input type="checkbox" checked={aiVibe} onChange={(e) => setAiVibe(e.target.checked)} /> {tx("Laisser Sonyria choisir aussi le style, la tonalité et le tempo")}</label>
           {aiStatus?.ai === false && <div className="hint">{tx("IA non configurée : ajoute ANTHROPIC_API_KEY dans Vercel.")}</div>}
         </div>
+        </>}
       </>}
 
       {/* ================= MÉLODIE ================= */}
@@ -1706,7 +1739,7 @@ function SongsSheet({ song, me, load, close, say }) {
     if (!file) return;
     try {
       const { song: s, from } = await fileToSong(file);
-      const d = newSong(); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); close();
+      const d = newSong(''); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); close();
       say(from ? tx('Chanson de {n} ouverte — elle est maintenant dans tes chansons', { n: from }) : tx('Chanson ouverte — elle est maintenant dans tes chansons'));
     } catch (e) { say(tx('Ce fichier n’est pas une chanson Sonyria')); }
   };
@@ -1745,7 +1778,7 @@ function SongsSheet({ song, me, load, close, say }) {
     {list == null ? <span className="busy" /> : !list.length ? <div className="hint">{tx("Rien d’enregistré pour l’instant (sauvegarde automatique).")}</div> :
       list.map((x) => (
         <div key={x.id} className="row nw" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-          <button className="grow" style={{ textAlign: 'left' }} onClick={async () => { const r = await DB.getSong(x.id); if (r) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } }}>
+          <button className="grow" style={{ textAlign: 'left' }} onClick={async () => { const r = await DB.getSong(x.id); if (r) { const d = newSong(''); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); close(); } }}>
             <b>{x.title || tx('Sans titre')}</b>{x.id === song.id && <span className="badge" style={{ marginLeft: 6 }}>{tx("ouverte")}</span>}<div className="hint">{new Date(x.updated).toLocaleString(getLang() === 'en' ? 'en-CA' : 'fr-CA')}</div>
           </button>
           <button className={'tgl' + (arm === x.id ? ' on' : '')} onClick={async () => {
