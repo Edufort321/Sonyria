@@ -578,3 +578,15 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .sync-row small { color: var(--dim); font-size: 11.5px; }
 .sync-row .col { display: flex; flex-direction: column; gap: 4px; }
 .sync-code { font: 700 17px 'JetBrains Mono', monospace; letter-spacing: 2px; margin: 4px 0; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; cursor: pointer; }
+/* ===== sous-sections dépliables ===== */
+.sub { margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.02); overflow: hidden; }
+.sub-h { width: 100%; display: flex; align-items: center; gap: 8px; padding: 11px 12px; font-weight: 700; font-size: 14px; text-align: left; }
+.sub-h span { flex: 1; min-width: 0; }
+.sub-h small { color: var(--cyan); font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.sub-h i { width: 8px; height: 8px; flex: none; border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim); transform: rotate(-45deg); transition: transform .2s; }
+.sub.open .sub-h i { transform: rotate(45deg); }
+.sub-b { padding: 0 12px 12px; }
+.sub-b > .dropzone { margin-top: 0; }
+.steps .step { padding: 7px 8px; }
+.steps .step .sn { width: 26px; height: 26px; font-size: 12.5px; }
+.steps .step b { font-size: 14px; }

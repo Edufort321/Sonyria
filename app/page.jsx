@@ -221,7 +221,7 @@ export default function Page() {
   }, []); // eslint-disable-line
 
   // ---------- cartes repliables ----------
-  const FOLD_DEFAULT = ['Pads en direct', 'Importer un MP4 ou un audio', 'Exporter', 'Effets de la voix guide', 'Tempo', 'Style'];
+  const FOLD_DEFAULT = ['Pads en direct', 'Importer un MP4 ou un audio', 'Effets de la voix guide', 'Tempo', 'Style', 'Fredonne ou chante', 'Propositions de mélodie'];
   useEffect(() => { try { setFolds(JSON.parse(localStorage.getItem('sonyria-folds') || '{}')); } catch (e) {} }, []);
   useEffect(() => {
     document.querySelectorAll('.app .card > h3').forEach((h) => {
@@ -941,6 +941,7 @@ export default function Page() {
             <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder={tx("Titre de la chanson")} />
             <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder={tx("Artiste")} style={{ maxWidth: 160 }} />
           </div>
+          <Sub k="lyr-import" t={tx('Importer mes compositions (photo, PDF, Word)')} open={!song.lyrics?.trim()}>
           <div className="dropzone" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); importCompositions(e.dataTransfer.files); }}>
             <div className="dz-t"><Ico n="upload" s={30} /><div><b>{tx('Dépose tes compositions')}</b><small>{tx('Photo d’un cahier ou d’une feuille manuscrite, PDF, Word ou texte')}</small></div></div>
             {busy === 'ocr' ? <div className="row"><Magic kind="ocr" /></div> : <div className="row">
@@ -950,6 +951,7 @@ export default function Page() {
             <label className="row" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={ocrFix} onChange={(e) => setOcrFix(e.target.checked)} /> {tx('Corriger le français en même temps (manuscrits et PDF)')}</label>
             <div className="hint">{tx('Plusieurs pages ? Sélectionne toutes les photos d’un coup, dans l’ordre.')}</div>
           </div>
+          </Sub>
           {ocr && <div className="card" style={{ borderColor: 'var(--cyan)' }}>
             <h3><Ico n="new" s={26} /> {tx('Texte importé')}</h3>
             {ocr.note && <div className="hint">{ocr.note}</div>}
@@ -963,7 +965,9 @@ export default function Page() {
           </div>}
           <label className="f">{tx("Tes paroles")}</label>
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
+          <Sub k="lyr-tips" t={tx('Astuces : sections et nuances')}>
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
+          </Sub>
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Sonyria")}</>}</button>
             <button className="btn sm" onClick={() => { if (!confirm(tx('Effacer les paroles et tout ce qui a été composé pour cette chanson ?'))) return; const n = freshFrom(song, true); n.id = song.id; load(n); say(tx('Page blanche — on garde ton style')); }}><Ico n="trash" s={20} /> {tx('Recommencer')}</button>
@@ -1011,7 +1015,7 @@ export default function Page() {
             const cur = !done && arr.slice(0, i).every((x) => x[3]);
             return <div key={k} className={'step' + (done ? ' done' : '') + (cur ? ' on' : '')}>
               <span className="sn">{done ? '✓' : i + 1}</span>
-              <div className="grow"><b>{t}</b><small>{d}</small></div>
+              <div className="grow"><b>{t}</b>{cur && <small>{d}</small>}</div>
               {k === 'style' ? <button className="btn sm pri" onClick={() => document.getElementById('g-amb')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{tx('Choisir')}</button>
                 : k !== 'paroles' && <button className={'btn sm' + (cur ? ' pri' : '')} onClick={() => { setTab(k); window.scrollTo({ top: 0 }); }}>{tx('Aller')} →</button>}
             </div>;
@@ -1179,6 +1183,7 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="studio-mic" s={30} /> {tx("Enregistrement")}</h3>
           {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Activer le micro")}</button> : <MicMeter eng={eng} />}
+          <Sub k="rec-opt" t={tx('Options : départ, décompte, karaoké, écho')}>
           <div className="row" style={{ marginTop: 10 }}>
             <div className="grow"><label className="f">{tx("Enregistrer à partir de")}</label>
               <select value={recFrom} onChange={(e) => setRecFrom(+e.target.value)}>
@@ -1192,11 +1197,14 @@ export default function Page() {
             <button className={'chip' + (song.guide ? ' on' : '')} onClick={() => up((s) => (s.guide = !s.guide))}><Ic n="music" size={14} /> {tx("Mélodie guide")}</button>
             <button className={'chip' + (song.echoCancel ? ' on' : '')} onClick={() => { up((s) => (s.echoCancel = !s.echoCancel)); setMicOn(false); }}><Ic n="noecho" size={14} /> {tx("Sans écouteurs")}</button>
           </div>
+          </Sub>
           <div style={{ height: 10 }} />
           {!rec ? <button className="btn rec wide" onClick={startRec}><Ico n="record" s={26} /> {tx("Enregistrer une prise")}</button>
             : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> {tx("Arrêter l’enregistrement")}</button>}
+          <Sub k="rec-lat" t={tx('Latence et conseils')}>
           <div className="sl" style={{ marginTop: 10 }}><span>{tx("Latence")}</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
           <div className="hint">{tx("Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.")}</div>
+          </Sub>
         </div>
         <div className="card film-card">
           <h3><Ico n="rec-button" s={28} /> {tx('Me filmer en chantant')}</h3>
@@ -1234,6 +1242,7 @@ export default function Page() {
               {Object.entries(VOICE_FX).map(([k, f]) => <button key={k} className={'chip' + (t.fx === k ? ' on' : '')} onClick={() => tr(t.id, (x) => Object.assign(x, fxParams(k), { fx: k }))}>{tx(f.n)}</button>)}
             </div>
             <Slider label="Volume" v={t.vol} min={0} max={1.5} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.vol = x))} />
+            <Sub k={'trfx-' + t.id} t={tx('Réglages fins : écho, réverb, doublage, panoramique')}>
             <Slider label="Écho" v={t.echo || 0} min={0} max={0.8} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.echo = x))} />
             <div className="sl"><span>{tx("Temps d’écho")}</span><select value={t.echoTime || '1/8.'} onChange={(e) => tr(t.id, (y) => (y.echoTime = e.target.value))}>{Object.keys(ECHO_TIMES).map((k) => <option key={k} value={k}>{k === 'slap' ? tx('Slap (court)') : k + (k.endsWith('.') ? ' ' + tx('pointée') : '')}</option>)}</select><output /></div>
             <Slider label="Répétitions" v={t.fb ?? 0.3} min={0} max={0.85} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.fb = x))} />
@@ -1241,6 +1250,7 @@ export default function Page() {
             <Slider label="Doublage" v={t.double || 0} min={0} max={1} step={0.01} fmt={(x) => Math.round(x * 100)} on={(x) => tr(t.id, (y) => (y.double = x))} />
             <Slider label="Brillance" v={t.bright || 0} min={-6} max={9} step={0.5} fmt={(x) => x + 'dB'} on={(x) => tr(t.id, (y) => (y.bright = x))} />
             <Slider label="Panoramique" v={t.pan || 0} min={-1} max={1} step={0.05} fmt={(x) => (x < 0 ? 'G' : x > 0 ? 'D' : 'C') + Math.abs(Math.round(x * 100))} on={(x) => tr(t.id, (y) => (y.pan = x))} />
+            </Sub>
             <div className="row" style={{ marginTop: 6 }}>
               <span className="hint">{tx("Décaler :")}</span>
               {[[-0.05, '−50ms'], [-0.01, '−10'], [0.01, '+10'], [0.05, '+50ms']].map(([d, n]) => <button key={n} className="btn sm" onClick={() => tr(t.id, (y) => (y.start = Math.max(0, y.start + d)))}>{tx(n)}</button>)}
@@ -1263,6 +1273,7 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="spectrum" s={28} /> {tx("Vidéoclip animé")}</h3>
           <canvas ref={clipRef} className="clip-cv" />
+          <Sub k="clip-vid" t={tx('Ma vidéo : me filmer ou importer un clip')} open>
           <div className="vid-src">
             <button className="btn pri" onClick={() => setCam(true)}><Ico n="rec-button" s={22} /> {tx('Me filmer')}</button>
             <label className="btn"><Ic n="film" /> {tx('Importer mon clip')}<input type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files[0]; if (f) attachVideo(f, { vSound: 'app' }).then(() => say(tx('Vidéo ajoutée — tes paroles s’affichent par-dessus'))); e.target.value = ''; }} /></label>
@@ -1282,11 +1293,17 @@ export default function Page() {
               <label className="row nw"><input type="checkbox" checked={!!song.clip.cutout} onChange={(e) => { const on = e.target.checked; if (on) loadCutout().then(() => bump()).catch(() => say(tx('Le détourage n’a pas pu se charger (connexion).'))); up((s) => (s.clip.cutout = on)); }} /> {tx('Me détourer (fond derrière moi)')}</label>
             </div>
           </div>}
+          </Sub>
+          <Sub k="clip-fmt" t={tx('Format')} note={song.clip.format}>
           <label className="f">{tx("Format prêt à publier (1080p)")}</label>
           <div className="chips">{Object.entries(PLATFORMS).map(([k, p]) => <button key={k} className={'chip' + (song.clip.format === p.f ? ' on' : '')} onClick={() => up((s) => (s.clip.format = p.f))}>{tx(p.n)} <small>{p.f}</small></button>)}</div>
+          </Sub>
+          <Sub k="clip-theme" t={tx('Thème visuel')} note={tx(THEMES[scenario.theme]?.n || '')} open>
           <label className="f">{tx("Thème visuel")} <small style={{ color: 'var(--dim)' }}>· {Object.keys(THEMES).length} {tx('styles')}</small></label>
           <div className="chips cats">{Object.entries(THEME_CATS).map(([k, n]) => <button key={k} className={'chip' + ((themeCat || THEMES[scenario.theme]?.c || 'lum') === k ? ' on' : '')} onClick={() => setThemeCat(k)}>{tx(n)}</button>)}</div>
           <div className="chips" style={{ marginTop: 6 }}>{Object.entries(THEMES).filter(([, t]) => t.c === (themeCat || THEMES[scenario.theme]?.c || 'lum')).map(([k, t]) => <button key={k} className={'chip' + (scenario.theme === k ? ' on' : '')} onClick={() => up((s) => { s.clip.theme = k; if (s.clip.scenario) s.clip.scenario = { ...s.clip.scenario, theme: k, sections: {} }; })}>{tx(t.n)}</button>)}</div>
+          </Sub>
+          <Sub k="clip-opt" t={tx('Paroles, pochette et scénario IA')}>
           <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.disc !== false} onChange={(e) => up((s) => (s.clip.disc = e.target.checked))} /> {coverUrl ? tx('Pastille de ma pochette qui tourne (style TikTok)') : tx('Pastille de pochette (crée ta pochette dans Mon album)')}</label>
           <label className="row nw" style={{ fontSize: 12.5, marginTop: 8 }}><input type="checkbox" checked={song.clip.lyrBox !== false} onChange={(e) => up((s) => (s.clip.lyrBox = e.target.checked))} /> {tx('Paroles dans une case qui s’adapte au fond (meilleur contraste)')}</label>
           <div className="chips" style={{ marginTop: 8 }}>{[['karaoke', 'Texte karaoké'], ['bounce', 'Texte qui rebondit']].map(([k, n]) => <button key={k} className={'chip' + ((scenario.textStyle || 'karaoke') === k ? ' on' : '')} onClick={() => up((s) => { s.clip.scenario = { ...scenario, textStyle: k }; })}>{tx(n)}</button>)}</div>
@@ -1297,6 +1314,7 @@ export default function Page() {
             {song.clip.scenario && <button className="btn sm" onClick={() => up((s) => (s.clip.scenario = null))}><Ic n="undo" /> {tx("Thème simple")}</button>}
           </div>
           <div className="hint" style={{ marginTop: 8 }}>{tx("Sonyria écrit le scénario : un thème, des couleurs et des mots-clés par section. L’animation suit le son et les paroles s’affichent en karaoké. Tes photos défilent en fond, une par ligne.")}</div>
+          </Sub>
         </div>
         <div className="card">
           <h3><Ico n="share" s={28} /> {tx("Exporter")}</h3>
@@ -1717,6 +1735,15 @@ function SyncPanel({ me, say, onPulled }) {
       <div className="hint" style={{ marginTop: 6 }}>{tx('Garde tes codes privés : toute personne qui a le code peut voir et modifier les chansons de cet espace.')}</div>
     </>}
   </>;
+}
+
+function Sub({ k, t, note, open, children }) {
+  const [o, setO] = useState(() => { try { const x = localStorage.getItem('sonyria-sub:' + k); return x == null ? !!open : x === '1'; } catch (e) { return !!open; } });
+  const tog = () => { const n = !o; setO(n); try { localStorage.setItem('sonyria-sub:' + k, n ? '1' : '0'); } catch (e) {} };
+  return <div className={'sub' + (o ? ' open' : '')}>
+    <button type="button" className="sub-h" onClick={tog}><span>{t}</span>{note ? <small>{note}</small> : null}<i /></button>
+    {o && <div className="sub-b">{children}</div>}
+  </div>;
 }
 
 function Structure({ song, up, tl, play, clock }) {
