@@ -6,15 +6,17 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const ok = (p) => /^sonyria\/[a-f0-9]{64}\/[\w\-.:]+(\/[\w\-.:%]+)*$/.test(p);
 const H = { 'Cache-Control': 'no-store' };
+// jeton du stockage Blob (nom par défaut ou préfixe personnalisé choisi dans Vercel)
+const TOKEN = () => process.env.BLOB_READ_WRITE_TOKEN || Object.entries(process.env).find(([k, v]) => /READ_WRITE_TOKEN$/.test(k) && String(v).startsWith('vercel_blob_rw_'))?.[1] || '';
 
 export async function GET(req) {
-  const ready = !!process.env.BLOB_READ_WRITE_TOKEN;
+  const token = TOKEN(), ready = !!token;
   const space = new URL(req.url).searchParams.get('space') || '';
   if (!space) return Response.json({ ready }, { headers: H });
   if (!ready) return Response.json({ ready, error: 'not-configured' }, { status: 503, headers: H });
   if (!/^[a-f0-9]{64}$/.test(space)) return Response.json({ error: 'bad space' }, { status: 400, headers: H });
   const out = []; let cursor;
-  do { const r = await list({ prefix: `sonyria/${space}/`, cursor, limit: 1000 }); out.push(...r.blobs.map((b) => ({ p: b.pathname, url: b.url, at: new Date(b.uploadedAt).getTime(), size: b.size }))); cursor = r.hasMore ? r.cursor : undefined; } while (cursor);
+  do { const r = await list({ prefix: `sonyria/${space}/`, cursor, limit: 1000, token }); out.push(...r.blobs.map((b) => ({ p: b.pathname, url: b.url, at: new Date(b.uploadedAt).getTime(), size: b.size }))); cursor = r.hasMore ? r.cursor : undefined; } while (cursor);
   return Response.json({ ready, blobs: out }, { headers: H });
 }
 
@@ -22,7 +24,7 @@ export async function POST(req) {
   const body = await req.json();
   try {
     const r = await handleUpload({
-      body, request: req,
+      body, request: req, token: TOKEN(),
       onBeforeGenerateToken: async (pathname) => {
         if (!ok(pathname)) throw new Error('chemin refusé');
         return { addRandomSuffix: false, allowOverwrite: true, maximumSizeInBytes: 300 * 1024 * 1024, cacheControlMaxAge: 60 };
@@ -36,6 +38,6 @@ export async function POST(req) {
 export async function DELETE(req) {
   const { urls = [] } = await req.json().catch(() => ({}));
   const good = urls.filter((u) => { try { return ok(new URL(u).pathname.slice(1)); } catch (e) { return false; } });
-  if (good.length) await del(good);
+  if (good.length) await del(good, { token: TOKEN() });
   return Response.json({ deleted: good.length }, { headers: H });
 }
