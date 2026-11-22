@@ -1,44 +1,54 @@
 // Sonyria — synchro entre appareils et équipes (Vercel Blob). Chaque espace = empreinte SHA-256 du code de synchro.
-import { handleUpload } from '@vercel/blob/client';
-import { list, del } from '@vercel/blob';
+// Accès au stockage : jeton BLOB_READ_WRITE_TOKEN, ou connexion OIDC du projet (BLOB_STORE_ID), selon comment le stockage a été relié.
+import { list, del, put } from '@vercel/blob';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 const ok = (p) => /^sonyria\/[a-f0-9]{64}\/[\w\-.:]+(\/[\w\-.:%]+)*$/.test(p);
 const H = { 'Cache-Control': 'no-store' };
-// jeton du stockage Blob (nom par défaut ou préfixe personnalisé choisi dans Vercel)
-const TOKEN = () => process.env.BLOB_READ_WRITE_TOKEN || Object.entries(process.env).find(([k, v]) => /READ_WRITE_TOKEN$/.test(k) && String(v).startsWith('vercel_blob_rw_'))?.[1] || '';
+const TOKEN = () => process.env.BLOB_READ_WRITE_TOKEN || Object.entries(process.env).find(([k, v]) => /READ_WRITE_TOKEN$/.test(k) && String(v).startsWith('vercel_blob_rw_'))?.[1] || undefined;
+const auth = () => (TOKEN() ? { token: TOKEN() } : {});
+const isReady = () => !!(TOKEN() || process.env.BLOB_STORE_ID);
 
 export async function GET(req) {
-  const token = TOKEN(), ready = !!token;
-  const space = new URL(req.url).searchParams.get('space') || '';
-  // diagnostic : noms des variables seulement (jamais les valeurs)
-  if (!space) return Response.json({ ready, vars: Object.keys(process.env).filter((k) => /BLOB|STORE|STORAGE/i.test(k)) }, { headers: H });
+  const u = new URL(req.url), ready = isReady();
+  const space = u.searchParams.get('space') || '';
+  if (u.searchParams.get('selftest')) {
+    try {
+      const p = 'sonyria/' + '0'.repeat(64) + '/selftest.txt';
+      const b = await put(p, 'ok ' + Date.now(), { access: 'public', addRandomSuffix: false, allowOverwrite: true, ...auth() });
+      const txt = await fetch(b.url + '?t=' + Date.now()).then((r) => r.text()).catch((e) => 'fetch: ' + e.message);
+      await del(b.url, auth());
+      return Response.json({ ok: true, read: txt.startsWith('ok') }, { headers: H });
+    } catch (e) { return Response.json({ ok: false, error: String(e.message || e) }, { headers: H }); }
+  }
+  if (!space) return Response.json({ ready, mode: TOKEN() ? 'token' : process.env.BLOB_STORE_ID ? 'oidc' : 'none' }, { headers: H });
   if (!ready) return Response.json({ ready, error: 'not-configured' }, { status: 503, headers: H });
   if (!/^[a-f0-9]{64}$/.test(space)) return Response.json({ error: 'bad space' }, { status: 400, headers: H });
-  const out = []; let cursor;
-  do { const r = await list({ prefix: `sonyria/${space}/`, cursor, limit: 1000, token }); out.push(...r.blobs.map((b) => ({ p: b.pathname, url: b.url, at: new Date(b.uploadedAt).getTime(), size: b.size }))); cursor = r.hasMore ? r.cursor : undefined; } while (cursor);
-  return Response.json({ ready, blobs: out }, { headers: H });
+  try {
+    const out = []; let cursor;
+    do { const r = await list({ prefix: `sonyria/${space}/`, cursor, limit: 1000, ...auth() }); out.push(...r.blobs.map((b) => ({ p: b.pathname, url: b.url, at: new Date(b.uploadedAt).getTime(), size: b.size }))); cursor = r.hasMore ? r.cursor : undefined; } while (cursor);
+    return Response.json({ ready, blobs: out }, { headers: H });
+  } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 500, headers: H }); }
 }
 
+// envoi d'un morceau (≤ 4 Mo) : le client découpe les gros fichiers
 export async function POST(req) {
-  const body = await req.json();
+  const path = new URL(req.url).searchParams.get('path') || '';
+  if (!ok(path)) return Response.json({ error: 'chemin refusé' }, { status: 400, headers: H });
+  if (!isReady()) return Response.json({ error: 'not-configured' }, { status: 503, headers: H });
   try {
-    const r = await handleUpload({
-      body, request: req, token: TOKEN(),
-      onBeforeGenerateToken: async (pathname) => {
-        if (!ok(pathname)) throw new Error('chemin refusé');
-        return { addRandomSuffix: false, allowOverwrite: true, maximumSizeInBytes: 300 * 1024 * 1024, cacheControlMaxAge: 60 };
-      },
-      onUploadCompleted: async () => {},
-    });
-    return Response.json(r, { headers: H });
-  } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 400, headers: H }); }
+    const body = await req.arrayBuffer();
+    if (body.byteLength > 4.3 * 1024 * 1024) return Response.json({ error: 'trop gros' }, { status: 413, headers: H });
+    const b = await put(path, Buffer.from(body), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: req.headers.get('content-type') || 'application/octet-stream', cacheControlMaxAge: 60, ...auth() });
+    return Response.json({ url: b.url }, { headers: H });
+  } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 500, headers: H }); }
 }
 
 export async function DELETE(req) {
   const { urls = [] } = await req.json().catch(() => ({}));
-  const good = urls.filter((u) => { try { return ok(new URL(u).pathname.slice(1)); } catch (e) { return false; } });
-  if (good.length) await del(good, { token: TOKEN() });
+  const good = urls.filter((x) => { try { return ok(new URL(x).pathname.slice(1)); } catch (e) { return false; } });
+  try { if (good.length) await del(good, auth()); } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 500, headers: H }); }
   return Response.json({ deleted: good.length }, { headers: H });
 }
