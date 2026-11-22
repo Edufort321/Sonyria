@@ -1,6 +1,6 @@
 // Sonyria — synchro entre appareils et équipes (Vercel Blob). Chaque espace = empreinte SHA-256 du code de synchro.
 // Accès au stockage : jeton BLOB_READ_WRITE_TOKEN, ou connexion OIDC du projet (BLOB_STORE_ID), selon comment le stockage a été relié.
-import { list, del, put } from '@vercel/blob';
+import { list, del, put, get } from '@vercel/blob';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,11 +17,17 @@ export async function GET(req) {
   if (u.searchParams.get('selftest')) {
     try {
       const p = 'sonyria/' + '0'.repeat(64) + '/selftest.txt';
-      const b = await put(p, 'ok ' + Date.now(), { access: 'public', addRandomSuffix: false, allowOverwrite: true, ...auth() });
-      const txt = await fetch(b.url + '?t=' + Date.now()).then((r) => r.text()).catch((e) => 'fetch: ' + e.message);
+      const b = await put(p, 'ok ' + Date.now(), { access: 'private', addRandomSuffix: false, allowOverwrite: true, ...auth() });
+      const g = await get(p, { access: 'private', useCache: false, ...auth() }); const txt = g ? await new Response(g.stream).text() : 'absent';
       await del(b.url, auth());
       return Response.json({ ok: true, read: txt.startsWith('ok') }, { headers: H });
     } catch (e) { return Response.json({ ok: false, error: String(e.message || e) }, { headers: H }); }
+  }
+  const file = u.searchParams.get('file');
+  if (file) {
+    if (!ok(file)) return new Response('refusé', { status: 400 });
+    try { const g = await get(file, { access: 'private', useCache: false, ...auth() }); if (!g) return new Response('absent', { status: 404 }); return new Response(g.stream, { headers: { 'Content-Type': g.blob?.contentType || 'application/octet-stream', ...H } }); }
+    catch (e) { return new Response(String(e.message || e), { status: 500 }); }
   }
   if (!space) return Response.json({ ready, mode: TOKEN() ? 'token' : process.env.BLOB_STORE_ID ? 'oidc' : 'none' }, { headers: H });
   if (!ready) return Response.json({ ready, error: 'not-configured' }, { status: 503, headers: H });
@@ -41,7 +47,7 @@ export async function POST(req) {
   try {
     const body = await req.arrayBuffer();
     if (body.byteLength > 4.3 * 1024 * 1024) return Response.json({ error: 'trop gros' }, { status: 413, headers: H });
-    const b = await put(path, Buffer.from(body), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: req.headers.get('content-type') || 'application/octet-stream', cacheControlMaxAge: 60, ...auth() });
+    const b = await put(path, Buffer.from(body), { access: 'private', addRandomSuffix: false, allowOverwrite: true, contentType: req.headers.get('content-type') || 'application/octet-stream', cacheControlMaxAge: 60, ...auth() });
     return Response.json({ url: b.url }, { headers: H });
   } catch (e) { return Response.json({ error: String(e.message || e) }, { status: 500, headers: H }); }
 }
