@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 38';
+const APP_VERSION = '2026.11.22 · 39';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -1288,7 +1288,7 @@ export default function Page() {
         </div>
 
         <div className="card">
-          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true })}><Ic n="loop" /> {tx("Boucle")}</button><button className="btn sm pri" onClick={() => openFs('beat')}><Ic n="max" /> {tx('Plein écran')}</button></h3>
+          <h3><Ico n="pads" s={28} /> Beat table<span className="sp" /><button className="btn sm" onClick={() => (playing ? stop() : play({ from: 0, to: Math.min(tl.bars.length, 4), loop: true }))}><Ic n="loop" /> {playing ? tx('Arrêter') : tx('Boucle 4 mesures')}</button><button className="btn sm pri" onClick={() => openFs('beat')}><Ic n="max" /> {tx('Plein écran')}</button></h3>
           {presetsEl}
           {beatGridEl}
         </div>
@@ -1640,7 +1640,7 @@ export default function Page() {
       {printOpen && <PrintView song={song} me={me} onClose={() => setPrintOpen(false)} />}
       {fs && <div className={'fs fs-' + fs}>
         <div className="fs-bar">
-          <button className="play" onClick={() => (playing ? stop() : play(fs === 'beat' ? { from: 0, to: Math.min(tl.bars.length, 4), loop: true } : { from: 0 }))} aria-label={tx('Lecture')}>{playing ? <Ico n="pause" s={48} /> : <Ico n="play" s={48} />}</button>
+          <button className="play" onClick={() => (playing ? stop() : play({ from: 0 }))} aria-label={tx('Lecture')}>{playing ? <Ico n="pause" s={48} /> : <Ico n="play" s={48} />}</button>
           <div className="fs-title"><b>{fs === 'beat' ? 'Beat table' : fs === 'arr' ? tx('Arrangement') : tx('Table de son')}</b><small>{song.title} · {tx(M.STYLES[song.style].n)} · {song.bpm} BPM · <span className="pos">{posLabel}</span></small></div>
           {fs === 'beat' && <div className="row nw" style={{ gap: 4 }}>
             <button className="tbtn" onClick={() => up((s) => (s.bpm = clamp(s.bpm - 1, 50, 200)))}>−</button>
@@ -2075,6 +2075,7 @@ function Arrangement({ song, up, preload, onFull }) {
         {onFull && <button className="btn sm pri" onClick={onFull} aria-label={tx('Plein écran')}><Ic n="max" /></button>}
       </h3>
       <div className="hint" style={{ marginBottom: 8 }}>{tx('Instruments de la proposition. Ajoute, enlève ou dose chaque instrument, même pendant que ça joue.')} {tx('✓ = vrai instrument enregistré.')}</div>
+      <label className="row nw" style={{ fontSize: 12.5, marginBottom: 4 }}><input type="checkbox" checked={song.evolve !== false} onChange={(e) => up((s) => (s.evolve = e.target.checked))} /> {tx('Arrangement qui évolue : intro dépouillée, 1er couplet léger, refrains pleins, pont intime')}</label>
       <label className="row nw" style={{ fontSize: 12.5, marginBottom: 8 }}><input type="checkbox" checked={song.realFirst !== false} onChange={(e) => { const on = e.target.checked; up((s) => { s.realFirst = on; s.layers = defaultLayers(s); }); preload(); }} /> {tx('Sons réels en priorité (vrais instruments enregistrés)')}</label>
       {layers.map((l) => (
         <div key={l.id} className={'arr-row' + (l.on === false ? ' off' : '')}>
