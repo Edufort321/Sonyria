@@ -15,13 +15,13 @@ import * as DB from '@/lib/storage';
 import { songToFile, fileToSong, shareFile } from '@/lib/share';
 import { loadCutout } from '@/lib/cutout';
 import { makeBacking, BACKS, tune, gate, normalize, fades, trimStart } from '@/lib/backing';
-import { analyzeTake, remixPlan } from '@/lib/vocalai';
+import { analyzeTake, remixPlan, bestTakes, buildComp, covers, lineWindows } from '@/lib/vocalai';
 import { newCode, prettyCode, normCode, loadSpaces, saveSpaces, syncSpace, syncReady, peekSpace } from '@/lib/sync';
 import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/lib/cover';
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 39';
+const APP_VERSION = '2026.11.22 · 40';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -157,6 +157,8 @@ export default function Page() {
   const [range, setRange] = useState('all');
   const videoBg = useRef(null);
   const [recFrom, setRecFrom] = useState(0);
+  const [recTo, setRecTo] = useState(null); // null = jusqu'à la fin
+  const [recMode, setRecMode] = useState('all'); // 'all' = toute la chanson, 'sec' = section par section
   const eng = useRef(null);
   const recInfo = useRef(null);
   const saveT = useRef(null);
@@ -511,9 +513,10 @@ export default function Page() {
     const e = await ensureAudio();
     try { await e.openMic(song.echoCancel); setMicOn(true); return e; } catch (err) { say(tx('Micro refusé : autorise le micro pour Sonyria dans le navigateur.')); return null; }
   };
+  const sections = useMemo(() => { const o = []; tl.lines.forEach((l) => { const last = o[o.length - 1]; if (!last || last.fi !== l.fi) o.push({ fi: l.fi, label: l.label, from: l.b0, to: l.b0 + l.bars, inst: l.inst }); else last.to = l.b0 + l.bars; }); return o; }, [tl]);
   const startRec = async () => {
     const e = await openMic(); if (!e) return;
-    const pos = e.play(song, { from: recFrom, countIn: song.countIn ? 1 : 0, loop: false, onEnd: () => finishRec() });
+    const pos = e.play(song, { from: recFrom, to: recTo ?? undefined, countIn: song.countIn ? 1 : 0, loop: false, onEnd: () => finishRec() });
     if (!pos) return;
     e.startRecording();
     recInfo.current = { t0: pos.t0, fromSec: pos.fromSec };
@@ -533,8 +536,13 @@ export default function Page() {
       const nb = e.ctx.createBuffer(1, buffer.length - cut, buffer.sampleRate);
       nb.getChannelData(0).set(buffer.getChannelData(0).subarray(cut)); buffer = nb; st = 0;
     }
-    up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Voix {n}', { n: s.tracks.length + 1 }), start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
+    const nTake = song.tracks.filter((x) => x.take).length + 1;
+    const secA = sections.find((x) => x.from <= recFrom && recFrom < x.to), secB = recTo != null ? sections.find((x) => x.to === recTo) : null;
+    const range = recTo == null && recFrom === 0 ? tx('toute la chanson') : `${M.localLabel(secA?.label || '') || tx('début')} → ${recTo == null ? tx('fin') : M.localLabel(secB?.label || '')}`;
+    up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
     say(tx('Prise enregistrée')); snapshot(tx('Nouvelle prise de voix'));
+    // enregistrement progressif : on passe à la section suivante
+    if (recMode === 'sec' && recTo != null) { const i = sections.findIndex((x) => x.to === recTo); const nx = sections[i + 1]; if (nx) { setRecFrom(nx.from); setRecTo(nx.to); say(tx('Prochaine section prête : {n}', { n: M.localLabel(nx.label) })); } }
   };
   const setVideoBg = (file) => {
     if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
@@ -637,6 +645,36 @@ export default function Page() {
       setCoachAi(d);
     } catch (e) { say(e.message); }
     setBusy('');
+  };
+  // ---------- montage des prises (comping) ----------
+  const takes = song.tracks.filter((t) => t.data && (t.take || (!t.back && !t.remix && !t.comp)));
+  const compAuto = async () => {
+    if (!takes.length) return; setBusy('comp'); await new Promise((r) => setTimeout(r, 40));
+    try { const pick = bestTakes(takes, buildTimeline(song), song); up((s) => (s.comp = { ...(s.comp || {}), ...pick })); say(tx('Sonyria a choisi la meilleure prise pour chaque ligne')); } catch (e) { say(tx('Analyse impossible')); }
+    setBusy('');
+  };
+  const compBuild = async () => {
+    const choice = song.comp || {}; if (!Object.keys(choice).length) return say(tx('Choisis d’abord une prise par ligne (ou touche « Choisir pour moi »)'));
+    setBusy('comp'); await new Promise((r) => setTimeout(r, 40));
+    try {
+      const e = await ensureAudio(); await snapshot(tx('Avant le montage des prises'), 'named');
+      const r = buildComp(takes, buildTimeline(song), song, choice); if (!r) throw new Error('vide');
+      const used = new Set(Object.values(choice));
+      up((s) => {
+        s.tracks = s.tracks.filter((x) => !x.comp);
+        s.tracks.forEach((x) => { if (used.has(x.id)) x.mute = true; });
+        mkTrack(s, tx('Voix finale (montage)'), r.data, r.sr, 0, false, 'studio');
+        Object.assign(s.tracks[s.tracks.length - 1], { comp: true, vol: 1 });
+      });
+      song.tracks.forEach((x) => { if (!x.buffer && x.data) x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
+      say(tx('Voix finale assemblée — raccords fondus, niveaux égalisés. Tes prises sont gardées (en muet).'));
+    } catch (err) { say(tx('Montage impossible')); }
+    setBusy('');
+  };
+  const previewTake = (L, tid) => {
+    const bar = 16 * s16(song.bpm), prev = song.tracks.map((t) => [t.id, t.solo]);
+    up((s) => s.tracks.forEach((t) => (t.solo = t.id === tid)));
+    play({ from: Math.max(0, L.t0 - 0.8) / bar, to: Math.ceil((L.t1 + 0.6) / bar), onEnd: () => up((s) => s.tracks.forEach((t) => (t.solo = (prev.find((p) => p[0] === t.id) || [])[1] || false))) });
   };
   const lastSnap = useRef(0);
   const snapshot = async (name, kind = 'auto') => {
@@ -1323,12 +1361,23 @@ export default function Page() {
         <div className="card">
           <h3><Ico n="studio-mic" s={30} /> {tx("Enregistrement")}</h3>
           {!micOn ? <button className="btn pri wide" onClick={openMic}><Ic n="mic" /> {tx("Activer le micro")}</button> : <MicMeter eng={eng} />}
-          <Sub k="rec-opt" t={tx('Options : départ, décompte, karaoké, écho')}>
+          <Sub k="rec-opt" t={tx('Quoi enregistrer : toute la chanson ou section par section')} open>
           <div className="row" style={{ marginTop: 10 }}>
+            <div className="grow" style={{ flexBasis: '100%' }}>
+              <div className="chips">
+                <button className={'chip' + (recMode === 'all' ? ' on' : '')} onClick={() => { setRecMode('all'); setRecFrom(0); setRecTo(null); }}>{tx('Toute la chanson d’un coup')}</button>
+                <button className={'chip' + (recMode === 'sec' ? ' on' : '')} onClick={() => { setRecMode('sec'); const s0 = sections.find((x) => !x.inst) || sections[0]; if (s0) { setRecFrom(s0.from); setRecTo(s0.to); } }}>{tx('Section par section (progressif)')}</button>
+              </div>
+            </div>
             <div className="grow"><label className="f">{tx("Enregistrer à partir de")}</label>
-              <select value={recFrom} onChange={(e) => setRecFrom(+e.target.value)}>
+              <select value={recFrom} onChange={(e) => { const v = +e.target.value; setRecFrom(v); if (recTo != null && recTo <= v) setRecTo(null); }}>
                 <option value={0}>{tx("Début de la chanson")}</option>
-                {tl.lines.map((l, i) => <option key={i} value={l.b0}>{l.label} — {l.text.slice(0, 32)}</option>)}
+                {sections.map((x, i) => <option key={i} value={x.from}>{i + 1}. {M.localLabel(x.label)}</option>)}
+              </select></div>
+            <div className="grow"><label className="f">{tx('Jusqu’à')}</label>
+              <select value={recTo ?? ''} onChange={(e) => setRecTo(e.target.value === '' ? null : +e.target.value)}>
+                <option value="">{tx('La fin de la chanson')}</option>
+                {sections.filter((x) => x.to > recFrom).map((x, i) => <option key={i} value={x.to}>{tx('Fin de')} {M.localLabel(x.label)}</option>)}
               </select></div>
           </div>
           <div className="chips" style={{ marginTop: 8 }}>
@@ -1361,6 +1410,27 @@ export default function Page() {
         </div>
 
         {!song.tracks.length && <div className="empty">{tx("Aucune prise pour l’instant.")}<br />{tx("Enregistre ta voix, une guitare ou ton rythme parlé.")}</div>}
+        {takes.length > 0 && <div className="card comp-card">
+          <h3><Ico n="waveform" s={28} /> {tx('Montage : le meilleur de chaque prise')}</h3>
+          <div className="hint" style={{ marginBottom: 8 }}>{tx('Fais plusieurs prises (toute la chanson ou section par section), puis choisis la meilleure pour chaque ligne. Sonyria assemble une voix finale avec des raccords fondus et le même niveau partout, pour passer d’une prise à l’autre sans qu’on l’entende.')}</div>
+          <div className="row">
+            <button className="btn sm ai" disabled={!!busy} onClick={compAuto}>{busy === 'comp' ? <span className="busy" /> : <Ic n="sparkles" />} {tx('Choisir pour moi')}</button>
+            <button className="btn sm pri" disabled={!!busy || !Object.keys(song.comp || {}).length} onClick={compBuild}><Ic n="check" /> {tx('Assembler la voix finale')}</button>
+          </div>
+          <div className="comp-grid">
+            {lineWindows(tl, song).map((L) => {
+              const avail = takes.filter((t) => covers(t, L)); const cur = (song.comp || {})[L.idx];
+              return <div key={L.idx} className={'comp-row' + (avail.length ? '' : ' none')}>
+                <div className="comp-t"><small>{M.localLabel(L.label)}</small>{L.text}</div>
+                <div className="comp-ch">{avail.length ? avail.map((t, k) => <span key={t.id} className={'comp-tk' + (cur === t.id ? ' on' : '')}>
+                  <button onClick={() => up((s) => (s.comp = { ...(s.comp || {}), [L.idx]: t.id }))}>{k + 1}</button>
+                  <button className="pv" onClick={() => previewTake(L, t.id)} aria-label={tx('Écouter')}><Ic n="play" size={11} /></button>
+                </span>) : <small className="hint">{tx('pas encore enregistrée')}</small>}</div>
+              </div>;
+            })}
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>{tx('Les numéros = tes prises, dans l’ordre. ▶ écoute la ligne avec cette prise seulement.')}</div>
+        </div>}
         {song.tracks.some((t) => t.data && !t.back) && <div className="card pro-card">
           <h3><Ico n="headphones-heart" s={28} /> {tx('Remix pro & professeur de chant')}</h3>
           <div className="row">
