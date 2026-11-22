@@ -100,6 +100,12 @@ export default function Page() {
   const [ocr, setOcr] = useState(null);
   const [ocrFix, setOcrFix] = useState(true);
   const [printOpen, setPrintOpen] = useState(false);
+  const [guide, setGuide] = useState({ on: false, step: 0 });
+  const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
+  const goStep = (i) => {
+    const g = GUIDE[i]; saveGuide({ on: true, step: i }); setTab(g.tab);
+    setTimeout(() => { const el = g.anchor && (document.getElementById(g.anchor + '-guide') || document.getElementById(g.anchor)); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); else window.scrollTo({ top: 0, behavior: 'smooth' }); }, 80);
+  };
   const humInfo = useRef(null);
   const [clock, setClock] = useState(null);
   const [aiVibe, setAiVibe] = useState(false);
@@ -167,6 +173,7 @@ export default function Page() {
         const id = localStorage.getItem('sonyria-current');
         setCode(localStorage.getItem('sonyria-code') || '');
         setMeState(loadMe());
+        try { const gg = JSON.parse(localStorage.getItem('sonyria-guide') || 'null'); setGuide(gg || { on: true, step: 0 }); } catch (e) { setGuide({ on: true, step: 0 }); }
         setLangState(initLang());
         if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
       } catch (e) {}
@@ -299,7 +306,7 @@ export default function Page() {
     try {
       const d = await ai('polish', { lyrics: song.lyrics });
       if (!d.lyrics || d.lyrics.length < 10) throw new Error(tx('Réponse vide'));
-      setPolish({ lyrics: String(d.lyrics).replace(/\\n/g, '\n'), changes: (d.changes || []).slice(0, 12), note: d.note || '' });
+      setPolish({ lyrics: String(d.lyrics).replace(/\\n/g, '\n'), sugg: (d.suggestions || []).slice(0, 10).map((x) => ({ ...x, done: false })), fixes: d.fixes, note: d.note || '' });
     } catch (e) { say(e.message); }
     setBusy('');
   };
@@ -646,7 +653,7 @@ export default function Page() {
       {splash && <Splash onDone={() => setSplash(false)} />}
       {!splash && me && !me.onboarded && <Onboarding me={me} setMe={setMe} lang={lang} setLang={setLang} install={install} onInstall={doInstall}
         onFinish={(choice) => {
-          setMe({ ...me, onboarded: true });
+          setMe({ ...me, onboarded: true }); saveGuide({ on: true, step: 0 });
           if (choice === 'paroles') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('paroles'); }
           else if (choice === 'import') { const n = newSong(''); n.artist = me.artist || me.name || ''; load(n); setTab('studio'); }
           else { const n = newSong(getLang() === 'en' ? DEMO_EN : DEMO); n.artist = me.artist || me.name || ''; load(n); setTab('melodie'); }
@@ -661,6 +668,7 @@ export default function Page() {
           </div>
           <div className="tacts">
             <button className="tib" onClick={() => setSheet({ type: 'songs' })} title={tx('Mes chansons')} aria-label={tx('Mes chansons')}><Ico n="folder" s={26} /></button>
+            <button className="tib help" onClick={() => (guide.on ? saveGuide({ ...guide, on: false }) : goStep(GUIDE.findIndex((x) => x.tab === tab)))} title={tx('Guide des premiers pas')} aria-label={tx('Guide des premiers pas')}>?</button>
             <button className="tib" onClick={() => setSheet({ type: 'settings' })} title={tx('Réglages')} aria-label={tx('Réglages')}><Ico n="settings" s={26} /></button>
             {me?.av && <button className="tav" onClick={() => setSheet({ type: 'profile' })} title={tx('Mon profil')} aria-label={tx('Mon profil')}><img src={avSrc(me.av)} alt="" /></button>}
             <div className="tlang" role="group" aria-label="Langue / Language">
@@ -675,9 +683,10 @@ export default function Page() {
       </div>
       <div className="app">
 
+      {guide.on && me?.onboarded && (() => { const st = GUIDE[guide.step]?.tab === tab ? guide.step : Math.max(0, GUIDE.findIndex((x) => x.tab === tab)); return GUIDE[st].anchor === 'g-amb' ? null : <GuideCard step={st} go={goStep} hide={() => saveGuide({ ...guide, on: false })} />; })()}
       {/* ================= PAROLES ================= */}
       {tab === 'paroles' && <>
-        <div className="card">
+        <div className="card" id="g-lyrics">
           <div className="row nw">
             <input type="text" value={song.title} onChange={(e) => up((s) => (s.title = e.target.value))} placeholder={tx("Titre de la chanson")} />
             <input type="text" value={song.artist} onChange={(e) => up((s) => (s.artist = e.target.value))} placeholder={tx("Artiste")} style={{ maxWidth: 160 }} />
@@ -706,14 +715,23 @@ export default function Page() {
           <textarea value={song.lyrics} onChange={(e) => onLyrics(e.target.value)} placeholder={tx("Colle ton texte ici…")} />
           <div className="hint">{tx("Astuce : écris")} <b>{tx("[Refrain]")}</b>, <b>{tx("[Couplet]")}</b> {tx("ou")} <b>{tx("[Pont]")}</b> {tx("au-dessus d’un bloc. Laisse une ligne vide entre les blocs. Ajoute une nuance dans l’en-tête :")} <b>{tx("[Pont (tout doucement)]")}</b>, <b>{tx("[Refrain (plus puissant)]")}</b>, <b>{tx("(très émouvant)")}</b>{tx(". Pour forcer un découpage de syllabe :")} <b>{tx("chan/tent")}</b>.</div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger et adapter avec Claude")}</>}</button>
+            <button className="btn sm ai" disabled={!!busy || aiStatus?.ai === false} onClick={aiPolish}>{busy === 'polish' ? <Magic kind="polish" /> : <><Ic n="wand" /> {tx("Corriger avec Claude")}</>}</button>
             {song.lyricsOriginal && <button className="btn sm" onClick={() => { const o = song.lyricsOriginal; up((s) => (s.lyricsOriginal = null)); analyze(o); }}><Ic n="undo" /> {tx("Revenir à mon original")}</button>}
           </div>
           {polish && <div className="card" style={{ borderColor: 'var(--orange)' }}>
             <h3><Ico n="ai" s={28} /> {tx("Version corrigée")}</h3>
             {polish.note && <div className="hint">{polish.note}</div>}
-            {polish.changes.length > 0 && <div style={{ margin: '8px 0' }}>{polish.changes.map((c, i) => <div key={i} className="hint" style={{ marginBottom: 6 }}><s>{c.avant}</s><br /><b style={{ color: 'var(--txt)' }}>→ {c.apres}</b> <i>({c.pourquoi})</i></div>)}</div>}
+            <div className="hint" style={{ marginBottom: 6 }}>{tx('Tes mots sont gardés : seules l’orthographe, les accords et la ponctuation sont corrigés.')}</div>
             <textarea value={polish.lyrics} onChange={(e) => setPolish({ ...polish, lyrics: e.target.value })} style={{ minHeight: 180 }} />
+            {polish.sugg?.length > 0 && <div className="sugg">
+              <label className="f">{tx('Suggestions de tournures (à toi de choisir)')}</label>
+              {polish.sugg.map((x, i) => (
+                <div key={i} className={'sg' + (x.done ? ' done' : '')}>
+                  <div className="sg-t"><s>{x.avant}</s><br /><b>→ {x.apres}</b><small>{x.pourquoi}</small></div>
+                  {x.done ? <button className="btn sm" onClick={() => setPolish({ ...polish, lyrics: polish.lyrics.replace(x.apres, x.avant), sugg: polish.sugg.map((y, j) => (j === i ? { ...y, done: false } : y)) })}><Ic n="undo" /></button>
+                    : <button className="btn sm pri" disabled={!polish.lyrics.includes(x.avant)} onClick={() => setPolish({ ...polish, lyrics: polish.lyrics.replace(x.avant, x.apres), sugg: polish.sugg.map((y, j) => (j === i ? { ...y, done: true } : y)) })}><Ic n="check" /> {tx('Appliquer')}</button>}
+                </div>))}
+            </div>}
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn pri" onClick={() => { const orig = song.lyricsOriginal || song.lyrics; up((s) => (s.lyricsOriginal = orig)); analyze(polish.lyrics); setPolish(null); say(tx('Nouvelle version appliquée — ton original est gardé')); }}><Ic n="check" /> {tx("Utiliser cette version")}</button>
               <button className="btn" onClick={() => setPolish(null)}>{tx("Garder la mienne")}</button>
@@ -723,7 +741,8 @@ export default function Page() {
           <div className="hint" style={{ marginTop: 6 }}>{tx('{l} lignes · {s} syllabes · {b} sections', { l: flat(song).length, s: flat(song).reduce((a, x) => a + x.l.syls.length, 0), b: song.blocks.length })}</div>
         </div>
 
-        <div className="card">
+        {guide.on && me?.onboarded && GUIDE[guide.step]?.anchor === 'g-amb' && <div id="g-amb-guide"><GuideCard step={guide.step} go={goStep} hide={() => saveGuide({ ...guide, on: false })} /></div>}
+        <div className="card" id="g-amb">
           <h3><Ico n="headphones-wave" s={28} /> {tx("Ambiances proposées")}<span className="sp" />
             <button className="btn sm ai" disabled={!!busy} onClick={aiAmbiances}>{busy === 'amb' ? <Magic kind="amb" /> : <><Ic n="sparkles" /> {tx('Demander à Claude')}</>}</button>
           </h3>
@@ -1171,6 +1190,36 @@ function PrintView({ song, me, onClose }) {
         {mode === 'lyrics' && song.blocks.map((b, i) => <div key={i} className="cs-block"><div className="sc-sec">{M.localLabel(b.label)}</div>{b.lines.map((l, j) => <div key={j} className="ly-line">{l.text}</div>)}</div>)}
         <div className="sc-foot">Sonyria · sonyria.vercel.app</div>
       </div>
+    </div>
+  );
+}
+
+const GUIDE = [
+  { tab: 'paroles', anchor: 'g-lyrics', t: 'Tes paroles', d: 'Écris ou colle ton texte, ou dépose une photo de ton cahier, un PDF ou un fichier Word. Mets [Couplet], [Refrain] ou [Pont] au-dessus de chaque bloc. Le bouton « Corriger avec Claude » corrige l’orthographe sans toucher à tes mots.' },
+  { tab: 'paroles', anchor: 'g-amb', t: 'L’ambiance', d: 'Touche une des ambiances proposées : tu entends tout de suite un extrait. Tu peux aussi choisir toi-même le style, la tonalité et le tempo juste en dessous.' },
+  { tab: 'melodie', anchor: null, t: 'La mélodie', d: 'Écoute les propositions A, B, C, D ou demande une mélodie à Claude. Touche un accord pour le changer, ou une syllabe pour monter, descendre ou allonger sa note. Le bouton Partition imprime le tout.' },
+  { tab: 'beat', anchor: null, t: 'Le beat', d: 'Choisis la batterie (acoustique, TR-808, LinnDrum), ajuste le tempo et touche les cases de la grille pour créer ton rythme.' },
+  { tab: 'studio', anchor: null, t: 'Enregistrer', d: 'Mets des écouteurs, puis enregistre ta voix avec le karaoké qui défile. Tu peux aussi fredonner une mélodie : Sonyria la transcrit et ajoute la musique.' },
+  { tab: 'table', anchor: null, t: 'Le mixage', d: 'Monte ou baisse chaque instrument et ta voix avec les faders. Ajoute de l’écho et de la réverb à ta voix dans le Studio.' },
+  { tab: 'clip', anchor: null, t: 'Partager', d: 'Crée ton vidéoclip et exporte en MP4 pour TikTok, Reels ou YouTube, ou en WAV. Tes chansons sont sauvegardées automatiquement dans Mes chansons.' },
+];
+
+function GuideCard({ step, go, hide }) {
+  const g = GUIDE[step];
+  return (
+    <div className="guide">
+      <div className="gsteps">{GUIDE.map((x, i) => <button key={i} className={(i === step ? 'on' : '') + (i < step ? ' done' : '')} onClick={() => go(i)} aria-label={tx(x.t)}>{i < step ? <Ic n="check" size={11} /> : i + 1}</button>)}</div>
+      <div className="gbody">
+        <div className="gtitle">{tx('Étape {n} sur {t}', { n: step + 1, t: GUIDE.length })} · <b>{tx(g.t)}</b></div>
+        <p>{tx(g.d)}</p>
+        <div className="row">
+          {step > 0 && <button className="btn sm" onClick={() => go(step - 1)}><Ic n="prev" /> {tx('Retour')}</button>}
+          <span className="grow" />
+          {step < GUIDE.length - 1 ? <button className="btn sm pri" onClick={() => go(step + 1)}>{tx('Étape suivante')} <Ic n="next" /></button>
+            : <button className="btn sm pri" onClick={hide}><Ic n="check" /> {tx('J’ai compris')}</button>}
+        </div>
+      </div>
+      <button className="gx" onClick={hide} aria-label={tx('Masquer le guide')}><Ic n="x" size={16} /></button>
     </div>
   );
 }

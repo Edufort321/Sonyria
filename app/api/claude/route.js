@@ -36,23 +36,22 @@ Transcris les paroles de toutes les pages, dans l’ordre.
 - Ignore le texte barré et le texte qui transparaît du verso de la feuille (écriture à l’envers, pâle).
 - Mets chaque en-tête entre crochets, ex. [Couplet 1], [Refrain (plus puissant)], [Pont (tout doucement)], et laisse une ligne vide entre les sections.
 - Coupe le texte en vers chantables (une phrase musicale par ligne, environ 6 à 12 syllabes).
-${p.correct ? '- Corrige aussi l’orthographe, les accords et la grammaire dans la langue des paroles, et ajuste légèrement une tournure seulement si elle se chante mal. Garde la voix et le sens de l’auteur.' : '- Ne corrige pas les mots : recopie fidèlement ce qui est écrit (tu peux seulement ajouter la ponctuation des fins de vers).'}
+${p.correct ? '- Corrige SEULEMENT l’orthographe, les accents, les accords et la ponctuation, dans la langue des paroles. Ne change AUCUN mot, n’ajoute ni ne retire rien : garde exactement les mots de l’auteur.' : '- Ne corrige rien : recopie fidèlement ce qui est écrit (tu peux seulement ajouter la ponctuation des fins de vers).'}
 - Si un mot est illisible, mets ta meilleure lecture suivie de (?).
 Réponds UNIQUEMENT avec ce JSON :
 {"title":"titre de la chanson ou chaîne vide","lyrics":"texte complet avec \\n entre les lignes","note":"une phrase : nombre de pages lues et ce qui était difficile à lire"}`;
   }
   if (task === 'polish') {
-    return `Tu es parolier et correcteur. Voici des paroles de chanson écrites à la main (souvent sans ponctuation, avec des fautes).
-Ta mission :
-1. Corriger l'orthographe, les accords et la grammaire DANS LA LANGUE DES PAROLES (si c'est du français : français québécois standard ; si c'est de l'anglais : anglais correct). Ne traduis jamais les paroles.
-2. Garder la voix, les images et le sens de l'auteur : change le moins possible.
-3. Quand une phrase ne se chante pas bien, ajuster la tournure (ordre des mots, mot plus court, rime plus juste) pour qu'elle « fitte » mieux sur la musique.
-4. Couper le texte en vers chantables de 6 à 12 syllabes, une phrase musicale par ligne ; les vers vont par paires qui riment quand c'est possible.
-5. Mettre chaque section sous un en-tête entre crochets, dans la langue des paroles : [Couplet 1], [Refrain], [Pont], [Fin]… ou [Verse 1], [Chorus], [Bridge], [Outro]… et GARDER les indications de l'auteur entre parenthèses dans l'en-tête, ex. [Refrain (plus puissant)], [Pont (tout doucement)].
-6. Retirer les répétitions accidentelles, mais garder les répétitions voulues (refrain).
+    return `Tu es correcteur de paroles de chanson. RÈGLE ABSOLUE : tu ne changes PAS les mots de l'auteur, ni l'ordre des mots, ni le sens.
+Dans "lyrics", fais SEULEMENT :
+- corriger l'orthographe, les accents, les accords (genre, nombre, conjugaison) et la ponctuation, dans la langue des paroles (français québécois standard si c'est du français) ;
+- remettre les en-têtes de sections entre crochets ([Couplet 1], [Refrain (plus puissant)]…, ou [Verse 1], [Chorus]… en anglais) en gardant les indications de l'auteur ;
+- couper les lignes trop longues en vers chantables (une phrase musicale par ligne), SANS changer les mots ;
+- retirer une ligne recopiée deux fois par accident.
+Ne traduis jamais. N'ajoute ni ne retire aucun mot.
+Ensuite, à part, propose dans "suggestions" des idées de tournures qui se chanteraient mieux (rime plus juste, mot plus court, ordre plus naturel). Ce ne sont que des propositions : l'auteur décidera. Maximum 10, les plus utiles d'abord. "avant" doit être un passage EXACT du texte corrigé.
 Réponds UNIQUEMENT avec ce JSON :
-{"lyrics":"texte complet corrigé avec \\n entre les lignes et une ligne vide entre les sections","changes":[{"avant":"...","apres":"...","pourquoi":"courte raison"}],"note":"une phrase en français"}
-Limite "changes" aux 12 ajustements de tournure les plus importants (pas les simples fautes d'orthographe).
+{"lyrics":"texte corrigé avec \\n entre les lignes et une ligne vide entre les sections","fixes":12,"suggestions":[{"avant":"passage exact","apres":"proposition","pourquoi":"courte raison"}],"note":"une phrase"}
 
 Paroles :
 ${p.lyrics}`;
