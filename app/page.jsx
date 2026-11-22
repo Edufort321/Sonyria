@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 42';
+const APP_VERSION = '2026.11.22 · 43';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -539,8 +539,8 @@ export default function Page() {
   };
   const finishRec = () => {
     const e = eng.current; if (!e || !e.recorder) { setRec(false); return; }
-    const r = e.stopRecording(); e.stop(); setRec(false); setPlaying(false);
-    if (!r) return;
+    const r = e.stopRecording(); e.stop(); setRec(false); setPlaying(false); releaseWake();
+    if (!r) { say(tx('Aucun son reçu du micro : vérifie que Sonyria a la permission du micro, puis réessaie.')); return; }
     const lat = song.latency ?? Math.round(e.latency() * 1000);
     let st = recInfo.current.fromSec + (r.ctxStart - recInfo.current.t0) - lat / 1000;
     let buffer = r.buffer;
@@ -553,15 +553,23 @@ export default function Page() {
     const nTake = song.tracks.filter((x) => x.take).length + 1;
     const secA = sections.find((x) => x.from <= recFrom && recFrom < x.to), secB = recTo != null ? sections.find((x) => x.to === recTo) : null;
     const range = recTo == null && recFrom === 0 ? tx('toute la chanson') : `${M.localLabel(secA?.label || '') || tx('début')} → ${recTo == null ? tx('fin') : M.localLabel(secB?.label || '')}`;
-    up((s) => s.tracks.push({ id: 't' + Date.now(), name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
-    say(tx('Prise enregistrée')); snapshot(tx('Nouvelle prise de voix'));
-    releaseWake();
+    const newId = 't' + Date.now();
+    up((s) => s.tracks.push({ id: newId, name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
+    snapshot(tx('Nouvelle prise de voix'));
+    setSheet({ type: 'take', id: newId, dur: buffer.duration, next: recMode === 'sec' });
     // sauvegarde tout de suite (pas d'attente) pour ne jamais perdre une prise
     try { const c = S.current; DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {}
     // enregistrement progressif : on passe à la section suivante
     if (recMode === 'sec' && recTo != null) { const i = sections.findIndex((x) => x.to === recTo); const nx = sections[i + 1]; if (nx) { setRecFrom(nx.from); setRecTo(nx.to); say(tx('Prochaine section prête : {n}', { n: M.localLabel(nx.label) })); } }
   };
   finishRecRef.current = finishRec;
+  const fmtDur = (x) => `${Math.floor(x / 60)}:${String(Math.round(x % 60)).padStart(2, '0')}`;
+  const playTake = (t) => {
+    const bar = 16 * s16(song.bpm), prev = song.tracks.map((x) => [x.id, x.solo]);
+    up((s) => s.tracks.forEach((x) => (x.solo = x.id === t.id)));
+    play({ from: Math.max(0, t.start - 0.3) / bar, onEnd: () => up((s) => s.tracks.forEach((x) => (x.solo = (prev.find((p) => p[0] === x.id) || [])[1] || false))) });
+  };
+  const delTake = (t) => { if (!confirm(tx('Supprimer « {n} » ? (Une version est gardée.)', { n: t.name }))) return; snapshot(tx('Avant de supprimer une prise'), 'named'); up((s) => { s.tracks = s.tracks.filter((x) => x.id !== t.id); }); say(tx('Prise supprimée')); };
   const setVideoBg = (file) => {
     if (videoBg.current) URL.revokeObjectURL(videoBg.current.src);
     const vd = document.createElement('video'); vd.src = URL.createObjectURL(file); vd.muted = true; vd.playsInline = true; vd.loop = true; vd.preload = 'auto';
@@ -1060,6 +1068,14 @@ export default function Page() {
   // plein écran dans l'app seulement (le plein écran du navigateur affichait un message « toucher pour sortir » qui restait à l'écran)
   const openFs = (k) => { setFs(k); window.scrollTo({ top: 0 }); };
   const closeFs = () => { setFs(null); try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} };
+  const toggleFold = (ev) => {
+    const h = ev.target.closest('.card > h3'); if (!h || h.closest('.fs, .sheet, .kara, .cam')) return;
+    if (ev.target.closest('button, input, select, label, a, textarea') && !ev.target.closest('.fold-btn')) return;
+    const k = h.dataset.fk; if (!k) return;
+    const nx = { ...folds, [k]: !h.parentElement.classList.contains('folded') };
+    setFolds(nx); try { localStorage.setItem('sonyria-folds', JSON.stringify(nx)); } catch (e) {}
+  };
+
   const TABS = [['paroles', 'new', 'Paroles'], ['melodie', 'note', 'Mélodie'], ['beat', 'drumkit', 'Beat'], ['studio', 'studio-mic', 'Studio'], ['table', 'sliders', 'Table'], ['clip', 'spectrum', 'Clip']];
 
   return (
@@ -1399,6 +1415,16 @@ export default function Page() {
           <div style={{ height: 10 }} />
           {!rec ? <button className="btn rec wide" onClick={startRec}><Ico n="record" s={26} /> {tx("Enregistrer une prise")}</button>
             : <button className="btn wide" onClick={finishRec}><span className="rec-dot" /> {tx("Arrêter l’enregistrement")}</button>}
+          {takes.length > 0 && <div className="mytakes">
+            <b>{tx('Mes prises')} ({takes.length})</b>
+            {takes.map((t, k) => <div key={t.id} className={'mt' + (t.mute ? ' muted' : '')}>
+              <button className="mini" onClick={() => playTake(t)} aria-label={tx('Écouter')}><Ic n="play" size={14} /></button>
+              <span className="grow">{t.name}<small> · {fmtDur(t.data.length / t.sr)}{t.mute ? ' · ' + tx('en muet') : ''}</small></span>
+              <button className="mini" onClick={() => up((s) => { const x = s.tracks.find((y) => y.id === t.id); if (x) x.mute = !x.mute; })} aria-label={tx('Muet')}><Ico n="mute" s={18} dim={!t.mute} /></button>
+              <button className="mini" onClick={() => delTake(t)} aria-label={tx('Supprimer')}><Ico n="trash" s={18} /></button>
+            </div>)}
+            <div className="hint">{tx('Plus bas : montage du meilleur de chaque prise, remix pro et réglages fins de chaque prise.')}</div>
+          </div>}
           <Sub k="rec-lat" t={tx('Latence et conseils')}>
           <div className="sl" style={{ marginTop: 10 }}><span>{tx("Latence")}</span><input type="range" min="-50" max="400" step="5" value={song.latency ?? Math.round((eng.current?.latency() || 0.04) * 1000)} onChange={(e) => up((s) => (s.latency = +e.target.value))} /><output>{song.latency ?? 'auto'}{song.latency != null ? 'ms' : ''}</output></div>
           <div className="hint">{tx("Mets des écouteurs pour que le beat ne s’enregistre pas dans le micro. Si ta voix arrive en retard, augmente la latence.")}</div>
@@ -1682,6 +1708,18 @@ export default function Page() {
           <button className="btn wide" style={{ marginTop: 12 }} onClick={() => setSheet(null)}>{tx("OK")}</button>
         </>}
         {sheet.type === 'songs' && <SongsSheet key={sheet.ask ? 'ask' : 'list'} startAsk={!!sheet.ask} song={song} me={me} load={load} close={() => setSheet(null)} say={say} onCover={(album) => setSheet({ type: 'cover', album })} onAlbumMp4={(album) => { setSheet(null); exportAlbum(album); }} coverV={coverV} onVersions={(id) => setSheet({ type: 'versions', id })} />}
+        {sheet.type === 'take' && (() => { const t = song.tracks.find((x) => x.id === sheet.id); return <>
+          <h3><Ic n="check" /> {tx('Prise enregistrée')}</h3>
+          <div className="take-ok"><b>{t?.name}</b><small>{fmtDur(sheet.dur || 0)} · {tx('sauvegardée dans ta chanson')}</small></div>
+          <div className="take-acts">
+            <button className="btn pri wide" onClick={() => t && playTake(t)}><Ic n="play" /> {tx('Écouter ma prise')}</button>
+            {sheet.next && <button className="btn wide" onClick={() => { setSheet(null); setTimeout(startRec, 200); }}><Ico n="record" s={20} /> {tx('Enregistrer la section suivante')}</button>}
+            <button className="btn wide" onClick={() => { setSheet(null); setTimeout(startRec, 200); }}><Ico n="record" s={20} /> {tx('Faire une autre prise (on garde celle-ci)')}</button>
+            <button className="btn wide" onClick={() => { if (t) up((s) => { s.tracks = s.tracks.filter((x) => x.id !== t.id); }); setSheet(null); setTimeout(startRec, 200); }}><Ic n="undo" /> {tx('Refaire : effacer celle-ci et recommencer')}</button>
+            <button className="btn wide" onClick={() => { setSheet(null); setTab('studio'); setTimeout(() => document.querySelector('.mytakes')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300); }}><Ico n="waveform" s={20} /> {tx('Voir toutes mes prises')}</button>
+          </div>
+          <div className="hint">{tx('Tes prises sont dans l’onglet Studio, sous le bouton Enregistrer. Tu peux en faire plusieurs puis garder le meilleur de chacune (Montage).')}</div>
+        </>; })()}
         {sheet.type === 'versions' && <VersionsSheet songId={sheet.id} song={song} load={load} say={say} snapshot={snapshot} back={() => setSheet({ type: 'songs' })} close={() => setSheet(null)} />}
         {sheet.type === 'cover' && <CoverEditor album={sheet.album} song={song} me={me} onSave={(url) => { saveCover(sheet.album, url); setCoverV((x) => x + 1); say(tx('Pochette enregistrée')); setSheet({ type: 'songs' }); }} onCancel={() => setSheet({ type: 'songs' })} />}
         {sheet.type === 'settings' && <>
