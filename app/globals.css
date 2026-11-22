@@ -639,3 +639,4 @@ input[type=range] { width: 100%; accent-color: var(--violet); }
 .ocr-choice { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .ocr-choice .btn.wide { flex-direction: column; align-items: flex-start; text-align: left; gap: 2px; padding: 10px 12px; }
 .ocr-choice .btn small { font-size: 11.5px; font-weight: 500; opacity: .8; }
+.topbar .tlogo, .topbar .bar, .topbar .tabs, .topbar .tab { transition: padding .18s ease, width .18s ease, height .18s ease; }

@@ -21,7 +21,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 37';
+const APP_VERSION = '2026.11.22 · 38';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -271,7 +271,9 @@ export default function Page() {
       } catch (e) {}
     })();
     fetch('/api/claude').then((r) => r.json()).then(setAiStatus).catch(() => setAiStatus({ ai: false }));
-    const onScroll = () => setCompact(window.scrollY > 40);
+    // en-tête compact avec marge (hystérésis) : il ne saute plus quand on est près du seuil
+    let cmp = false, raf0 = 0;
+    const onScroll = () => { if (raf0) return; raf0 = requestAnimationFrame(() => { raf0 = 0; const y = window.scrollY, room = document.documentElement.scrollHeight - window.innerHeight; const next = cmp ? y > 12 : y > 110 && room > 240; if (next !== cmp) { cmp = next; setCompact(next); } }); };
     window.addEventListener('scroll', onScroll, { passive: true });
     const off = onLang((l) => { setLangState(l); bump(); });
     // l'événement est capté tôt dans layout.js (sans preventDefault, la bannière native de Chrome reste)
