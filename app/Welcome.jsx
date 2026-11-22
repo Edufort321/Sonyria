@@ -17,8 +17,9 @@ export function Splash({ onDone }) {
   const [out, setOut] = useState(false);
   useEffect(() => {
     const fast = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const t1 = setTimeout(() => setOut(true), fast ? 500 : 2500);
-    const t2 = setTimeout(onDone, fast ? 900 : 3050);
+    let again = false; try { again = !!localStorage.getItem('sonyria-opened'); localStorage.setItem('sonyria-opened', '1'); } catch (e) {}
+    const t1 = setTimeout(() => setOut(true), fast ? 500 : again ? 900 : 2500);
+    const t2 = setTimeout(onDone, fast ? 900 : again ? 1400 : 3050);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []); // eslint-disable-line
   return (

@@ -93,7 +93,8 @@ export default function Page() {
   if (!S.current) S.current = newSong();
   const song = S.current;
   const [v, bump] = useReducer((x) => x + 1, 0);
-  const [tab, setTab] = useState('paroles');
+  const [tab, setTabState] = useState('paroles');
+  const setTab = (t) => { setTabState(t); try { localStorage.setItem('sonyria-tab', t); } catch (e) {} };
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
   const [kara, setKara] = useState(false);
@@ -207,7 +208,14 @@ export default function Page() {
         const id = localStorage.getItem('sonyria-current');
         setCode(localStorage.getItem('sonyria-code') || '');
         setMeState(loadMe());
-        try { const gg = JSON.parse(localStorage.getItem('sonyria-guide') || 'null'); setGuide(gg || { on: true, step: 0 }); } catch (e) { setGuide({ on: true, step: 0 }); }
+        try {
+          const gg = JSON.parse(localStorage.getItem('sonyria-guide') || 'null');
+          // le guide s'affiche à la première séance seulement; ensuite il reste caché (bouton ? pour le revoir)
+          const seen = localStorage.getItem('sonyria-guide-seen');
+          setGuide(gg ? (seen ? { ...gg, on: false } : gg) : { on: true, step: 0 });
+          if (gg) localStorage.setItem('sonyria-guide-seen', '1');
+        } catch (e) { setGuide({ on: true, step: 0 }); }
+        try { const lt = localStorage.getItem('sonyria-tab'); if (lt && ['paroles', 'melodie', 'beat', 'studio', 'table', 'clip'].includes(lt)) setTab(lt); } catch (e) {}
         setLangState(initLang());
         if (id) { const r = await DB.getSong(id); if (r?.song) { const d = newSong(); load({ ...d, ...r.song, mix: { ...d.mix, ...r.song.mix }, clip: { ...d.clip, ...r.song.clip } }); } }
         if (typeof window !== 'undefined' && 'launchQueue' in window) window.launchQueue.setConsumer(async (p) => { const h = p.files?.[0]; if (!h) return; try { const { song: s } = await fileToSong(await h.getFile()); const d = newSong(); load({ ...d, ...s, mix: { ...d.mix, ...s.mix }, clip: { ...d.clip, ...s.clip } }); } catch (e) {} });
