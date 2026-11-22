@@ -1,0 +1,11 @@
+Sonyria — crédits des sons / sound credits
+
+Piano à queue : Splendid Grand Piano (Steinway) — domaine public — github.com/sfzinstruments/SplendidGrandPiano
+Piano Rhodes : J. Learman Rhodes Mark I Stage 73 — CC0 1.0 — github.com/sfzinstruments/jlearman.jRhodes3d
+Saxophone ténor : Versilian Community Sample Library (VCSL) — CC0 1.0 — github.com/sgossner/VCSL
+Basse électrique, contrebasse : D. Smolken — CC0 1.0 — github.com/sfzinstruments
+Guitares, cordes, chœur, trompette, flûte, sax alto : FluidR3_GM, Frank Wen — licence MIT ; version MIDI.js de Benjamin Gleitzman (CC BY 3.0) — github.com/gleitz/midi-js-soundfonts
+Batterie acoustique : « Pearl Master Studio Pack 1 » par enoe — CC BY 3.0 — via github.com/oramics/sampled
+LinnDrum LM-2 : domaine public — via github.com/oramics/sampled
+Roland TR-808 : échantillons de Michael Fischer (Technopolis), distribués gratuitement — via github.com/danigb/samples
+Compilation : github.com/danigb/samples

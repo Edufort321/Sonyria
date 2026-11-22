@@ -2,7 +2,8 @@
 import { tx, initLang, setLang, onLang, getLang } from '@/lib/i18n';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
-import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime } from '@/lib/engine';
+import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
+import { KITS } from '@/lib/samples';
 import { ClipRenderer, THEMES, FORMATS, PLATFORMS, defaultScenario, loadImage } from '@/lib/video';
 import { separate, analyzeMusic, transcribe, buildSong, segsToLyrics } from '@/lib/analyze';
 import * as H from '@/lib/hum';
@@ -37,8 +38,8 @@ To the end of the night`;
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const fxParams = (k) => { const { n, ...p } = VOICE_FX[k]; return { echoTime: '1/8.', fb: 0.3, ...p }; };
-const LEADS = { voix: 'Voix', synth: 'Synthé', flute: 'Flûte', piano: 'Piano' };
-const CHORDS = { '': 'Auto (style)', piano: 'Piano', pad: 'Nappe', epiano: 'Piano électrique', pluck: 'Guitare pincée', power: 'Guitare saturée', supersaw: 'Supersaw' };
+const LEADS = { voix: 'Chœur (aah)', piano: 'Piano à queue', sax: 'Saxophone ténor', altosax: 'Saxophone alto', trumpet: 'Trompette', flute: 'Flûte', guitar: 'Guitare électrique', nylon: 'Guitare classique', strings: 'Cordes', synth: 'Synthé' };
+const CHORDS = { '': 'Auto (style)', piano: 'Piano à queue', epiano: 'Piano Rhodes', pluck: 'Guitare acoustique', nylon: 'Guitare classique', eguitar: 'Guitare électrique', power: 'Guitare saturée', strings: 'Cordes', choir: 'Chœur', synthpad: 'Nappe synthé', supersaw: 'Supersaw' };
 const HARMS = { off: 'Aucune', up3: 'Tierce au-dessus', down3: 'Tierce en dessous', up6: 'Sixte', oct: 'Octave' };
 const TYPES = { verse: 'Couplet', chorus: 'Refrain', bridge: 'Pont' };
 
@@ -55,6 +56,7 @@ function newSong(lyrics = DEMO) {
 }
 function applyStyle(s, style) {
   const st = M.STYLES[style];
+  s.kit = null;
   s.style = style; s.bpm = st.bpm; s.swing = st.swing; s.drums = M.drumPreset(st.drums); s.chordSound = '';
 }
 const flat = (s) => s.blocks.flatMap((b, bi) => b.lines.map((l, li) => ({ b, bi, l, li })));
@@ -211,6 +213,8 @@ export default function Page() {
     if (c.state !== 'running') await c.resume();
     song.tracks.forEach((t) => { if (!t.buffer && t.data) t.buffer = storeToBuffer(c, { sr: t.sr, ch: [t.data] }); });
     eng.current.applyMix(song);
+    // vrais instruments : on attend au plus 4 s (sinon le synthé prend le relais pendant le chargement)
+    await Promise.race([prepareSamples(c, song), new Promise((r) => setTimeout(r, 4000))]);
     return eng.current;
   };
   const play = async (opts = {}) => {
@@ -546,7 +550,7 @@ export default function Page() {
   };
   const exportWav = async () => {
     setExporting('wav');
-    try { await ensureAudio(); const buf = await renderOffline(song); saveBlob(wavBlob(buf), slug() + '.wav'); say(tx('WAV exporté')); } catch (e) { say(tx('Export impossible : ') + e.message); }
+    try { const e = await ensureAudio(); await prepareSamples(e.ctx, song); const buf = await renderOffline(song); saveBlob(wavBlob(buf), slug() + '.wav'); say(tx('WAV exporté')); } catch (e) { say(tx('Export impossible : ') + e.message); }
     setExporting('');
   };
   const exportLive = async (video) => {
@@ -832,6 +836,9 @@ export default function Page() {
           <input type="range" min="50" max="200" value={song.bpm} onChange={(e) => up((s) => (s.bpm = +e.target.value))} />
           <div className="sl"><span>{tx("Swing / groove")}</span><input type="range" min="0" max="0.7" step="0.05" value={song.swing} onChange={(e) => up((s) => (s.swing = +e.target.value))} /><output>{Math.round(song.swing * 100)}%</output></div>
           <div className="chips" style={{ marginTop: 6 }}>
+            {Object.entries(KITS).map(([k, n]) => <button key={k} className={'chip' + (kitFor(song) === k ? ' on' : '')} onClick={async () => { up((s) => (s.kit = k)); const e = await ensureAudio(); e.kit = k; e.drum('kick', e.ctx.currentTime + 0.05); e.drum('snare', e.ctx.currentTime + 0.35); }}><Ico n={k === 'acoustic' ? 'drumkit' : k === 'synth' ? 'synth' : 'pads'} s={18} /> {tx(n)}</button>)}
+          </div>
+          <div className="chips" style={{ marginTop: 6 }}>
             <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}><Ic n="drum" size={14} /> {tx("Batterie")}</button>
             <button className={'chip' + (song.metronome ? ' on' : '')} onClick={() => up((s) => (s.metronome = !s.metronome))}><Ic n="bell" size={14} /> {tx("Métronome")}</button>
             <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introBars = null; s.introChords = null; })}><Ic n="clap" size={14} /> {tx("Intro + fin")}</button>
@@ -1051,6 +1058,8 @@ export default function Page() {
           <div className="chips"><button className={'chip' + (!song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = false))}>C D E</button><button className={'chip' + (song.fr ? ' on' : '')} onClick={() => up((s) => (s.fr = true))}>{tx("Do Ré Mi")}</button></div>
           <label className="f">{tx("Profil")}</label>
           <div className="row"><button className="btn sm" onClick={() => setSheet({ type: 'profile' })}><Ic n="user" /> {tx("Prénom, nom d’artiste, avatar")}</button><button className="btn sm" onClick={() => { setMe({ ...me, onboarded: false }); setSheet(null); }}><Ic n="undo" /> {tx("Revoir l’accueil")}</button></div>
+          <label className="f">{tx('Crédits des sons')}</label>
+          <div className="hint">{tx('Vrais instruments enregistrés, sous licences libres :')} Splendid Grand Piano (domaine public), Rhodes J. Learman, VCSL, D. Smolken (CC0), FluidR3_GM – Frank Wen (MIT) / B. Gleitzman (CC BY 3.0), Pearl Master Studio – enoe (CC BY 3.0), LinnDrum (domaine public), TR-808 – Michael Fischer. <a href="/samples/CREDITS.txt" target="_blank" rel="noopener" style={{ color: 'var(--cyan)' }}>{tx('Détails')}</a></div>
           <label className="f">{tx("Installer l’app")}</label>
           <div className="hint">{tx("Android / Chrome : bouton « Installer » en haut, ou menu ⋮ → « Installer l’application ». iPhone : Partager → « Sur l’écran d’accueil ».")}</div>
           <button className="btn wide" style={{ marginTop: 14 }} onClick={() => setSheet(null)}>{tx("Fermer")}</button>
