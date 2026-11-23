@@ -22,7 +22,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 47';
+const APP_VERSION = '2026.11.22 · 48';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -82,6 +82,37 @@ function applyStyle(s, style) {
   s.kit = null; s.layers = null;
   s.style = style; s.bpm = st.bpm; s.swing = st.swing; s.drums = M.drumPreset(st.drums); if (!s.patterns || s.patterns.length <= 1) s.patterns = [{ id: 'A', name: 'Beat A', bars: 1, auto: true, drums: s.drums }]; else if (s.patterns.some((p) => p.auto)) B.arrangeBeats(s); s.chordSound = ''; s.leadSound = st.lead || 'voix';
   s.layers = defaultLayers(s);
+}
+// durée estimée selon les paroles + arrangement complet (structure, intro/fin, un beat par partie) — modifiable ensuite
+const LEN_OPTS = ['', 'moyen', 'long'];
+function lenSeconds(s, len) { const k = { length: s.length, form: s.form }; s.length = len; s.form = null; const n = buildTimeline(s).bars.length; s.length = k.length; s.form = k.form; return n * 240 / s.bpm; }
+// allonge une chanson courte : intro 4 mesures, interlude instrumental puis refrain, jusqu'à ~3 min
+function fullForm(s) {
+  const f = [...M.songForm(s)];
+  const ch = s.blocks.findIndex((b) => b.type === 'chorus' && b.lines?.length);
+  const vs = s.blocks.findIndex((b) => b.type === 'verse' && b.lines?.length);
+  if (ch < 0) return f;
+  if (!s.introUser) s.introBars = 4;
+  const sec = () => M.formSeconds(s, f) + 4 * 240 / s.bpm;
+  let g = 0, alt = 0;
+  while (sec() < 175 && g++ < 12) {
+    const at = f.length - (M.formBi(f[f.length - 1]) === ch ? 1 : 0); // avant le refrain final
+    f.splice(at, 0, 'i:' + (alt++ % 2 || vs < 0 ? ch : vs), ch);
+  }
+  return f;
+}
+function planSong(s, force) {
+  if (!s.blocks?.some((b) => b.lines?.length)) return null;
+  if (force || !s.lenUser) {
+    if (!s.introUser) s.intro = true;
+    if (!Array.isArray(s.form) || force) {
+      const d = LEN_OPTS.map((k) => [k, lenSeconds(s, k)]); const pick = d.find(([, x]) => x >= 165) || d[d.length - 1]; s.length = pick[0]; s.form = null;
+      if (pick[1] < 165) s.form = fullForm(s); // paroles courtes : interludes + refrains en plus pour une vraie chanson de ~3 min
+    }
+  }
+  if (force || !s.patterns || s.patterns.every((p) => p.auto)) B.arrangeBeats(s);
+  s.planned = true;
+  return buildTimeline(s).bars.length * 240 / s.bpm;
 }
 const flat = (s) => s.blocks.flatMap((b, bi) => b.lines.map((l, li) => ({ b, bi, l, li })));
 const serialize = (s) => ({ ...s, tracks: s.tracks.map(({ buffer, ...t }) => t) });
@@ -361,7 +392,7 @@ export default function Page() {
   const onLyrics = (text) => { song.lyrics = text; bump(); clearTimeout(lyricsT.current); lyricsT.current = setTimeout(() => analyze(text), 700); };
   const chooseAmb = async (a, i) => {
     setAmbSel(i);
-    up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; if (a.layers?.some((l) => l.role === 'melody')) s.layers = a.layers.map((l) => newLayer(l.role, l.inst, l.vol)); M.composeSong(s, s.variant); });
+    up((s) => { s.styleChosen = true; applyStyle(s, a.style); s.key = a.key; s.mode = a.mode; s.bpm = a.bpm; if (a.layers?.some((l) => l.role === 'melody')) s.layers = a.layers.map((l) => newLayer(l.role, l.inst, l.vol)); M.composeSong(s, s.variant); planSong(s); });
     try { const e = await ensureAudio(); prepareSamples(e.ctx, song); } catch (err) {}
     if (aiStatus?.ai) { await aiCompose(true); }
     play({ from: 0, to: Math.min(buildTimeline(song).bars.length, (song.intro ? 2 : 0) + 8), loop: false });
@@ -1078,7 +1109,7 @@ export default function Page() {
   const loopBeat = async (id) => { if (playing) return stop(); const e = await ensureAudio(); if (e.play(song, { loop: true, onlyBeat: id, onEnd: () => setPlaying(false) })) setPlaying(true); };
   const patternsEl = (
           <div className="beats">
-            <button className="btn pri ai-beats" onClick={() => { up((s) => B.arrangeBeats(s)); setCurPat(null); setBarPg(0); say(tx('Beats arrangés : intro, couplet, refrain, pont et fin s’enchaînent')); }}><Ic n="sparkles" /> {tx('IA : arranger tous les beats')}</button>
+            <button className="btn pri ai-beats" onClick={() => { let d; up((s) => { d = planSong(s, true) || (B.arrangeBeats(s), null); }); setCurPat(null); setBarPg(0); say(d ? tx('Arrangement complet créé : {d} selon tes paroles. Modifie-le à ton goût dans Beat et Mélodie.', { d: fmtDur(d) }) : tx('Beats arrangés : intro, couplet, refrain, pont et fin s’enchaînent')); }}><Ic n="sparkles" /> {hasLines ? tx('IA : arrangement complet selon mes paroles') : tx('IA : arranger tous les beats')}</button>
             <div className="chips beat-chips">
               {song.patterns.map((p) => <button key={p.id} className={'chip' + (p.id === cp.id ? ' on' : '')} onClick={() => { setCurPat(p.id); setBarPg(0); }}><b>{p.id}</b> {tx(p.name)} <small>· {p.bars} {tx(p.bars > 1 ? 'mesures' : 'mesure')}</small></button>)}
               <button className="chip" onClick={() => { let id; up((s) => { id = B.addPattern(s, null).id; }); setCurPat(id); setBarPg(0); }}><Ic n="plus" size={14} /> {tx('Nouveau beat')}</button>
@@ -1096,7 +1127,8 @@ export default function Page() {
   );
   const chainEl = hasLines ? (
           <div className="beat-secs">
-            <p className="hint">{tx('Chaque partie de ta chanson joue son beat. La chanson complète dure')} <b>{fmtDur(songSec)}</b>.</p>
+            <p className="hint">{tx('Durée estimée selon tes paroles :')} <b>{fmtDur(songSec)}</b>. {tx('Chaque partie joue son beat; change la longueur ou le beat de chaque partie à ton goût.')}</p>
+            <div className="chips"><button className={'chip' + (Array.isArray(song.form) && song.planned ? ' on' : '')} onClick={() => up((s) => { s.lenUser = false; planSong(s, true); })}><Ic n="sparkles" size={14} /> {tx('Auto (~3 min)')}</button>{[['', 'Courte'], ['moyen', 'Complète'], ['long', 'Longue']].map(([k, n]) => <button key={k} className={'chip' + ((song.length || '') === k && !Array.isArray(song.form) ? ' on' : '')} onClick={() => up((s) => { s.length = k; s.form = null; s.lenUser = true; s.planned = false; })}>{tx(n)} · {fmtDur(lenSeconds(song, k))}</button>)}</div>
             {secTypes.map((t) => <label key={t} className="sec-beat"><span>{tx(SEC_N[t] || t)}</span>
               <select value={song.secBeat?.[t] || ''} onChange={(ev) => up((s) => { B.ensurePatterns(s); s.secBeat[t] = ev.target.value || undefined; if (!ev.target.value) delete s.secBeat[t]; })}>
                 <option value="">{tx('Auto (selon la partie)')}</option>
@@ -1313,7 +1345,7 @@ export default function Page() {
           <h3><Ico n="note-purple" s={28} /> Style</h3>
           <div className="styles">
             {Object.entries(M.STYLES).map(([k, s]) => (
-              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { x.styleChosen = true; applyStyle(x, k); M.composeSong(x, x.variant); })}><b><Ico n={s.e} s={40} /></b>{tx(s.n)}</button>
+              <button key={k} className={'style-c' + (song.style === k ? ' on' : '')} onClick={() => up((x) => { x.styleChosen = true; applyStyle(x, k); M.composeSong(x, x.variant); const d = planSong(x); if (d) say(tx('Arrangement complet créé : {d} selon tes paroles. Modifie-le à ton goût dans Beat et Mélodie.', { d: `${Math.floor(d / 60)}:${String(Math.round(d % 60)).padStart(2, '0')}` })); })}><b><Ico n={s.e} s={40} /></b>{tx(s.n)}</button>
             ))}
           </div>
           <div className="row" style={{ marginTop: 12 }}>
@@ -1413,7 +1445,7 @@ export default function Page() {
           <div className="chips" style={{ marginTop: 6 }}>
             <button className={'chip' + (song.drumsOn ? ' on' : '')} onClick={() => up((s) => (s.drumsOn = !s.drumsOn))}><Ic n="drum" size={14} /> {tx("Batterie")}</button>
             <button className={'chip' + (song.metronome ? ' on' : '')} onClick={() => up((s) => (s.metronome = !s.metronome))}><Ic n="bell" size={14} /> {tx("Métronome")}</button>
-            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introBars = null; s.introChords = null; })}><Ic n="clap" size={14} /> {tx("Intro + fin")}</button>
+            <button className={'chip' + (song.intro ? ' on' : '')} onClick={() => up((s) => { s.intro = !s.intro; s.introUser = true; s.introBars = null; s.introChords = null; })}><Ic n="clap" size={14} /> {tx("Intro + fin")}</button>
           </div>
         </div>
 
@@ -2284,7 +2316,7 @@ function Structure({ song, up, tl, play, clock }) {
       </h3>
       <div className="chips" style={{ marginBottom: 8 }}>
         <span className="hint" style={{ alignSelf: 'center' }}>{tx('Longueur')} :</span>
-        {[['', 'Mes paroles'], ['moyen', 'Complète (solo + double refrain)'], ['long', 'Longue (+ interlude et outro)']].map(([k, n]) => <button key={k} className={'chip' + ((song.length || '') === k && auto ? ' on' : '')} onClick={() => up((s) => { s.length = k; s.form = null; })}>{tx(n)}</button>)}
+        {[['', 'Mes paroles'], ['moyen', 'Complète (solo + double refrain)'], ['long', 'Longue (+ interlude et outro)']].map(([k, n]) => <button key={k} className={'chip' + ((song.length || '') === k && auto ? ' on' : '')} onClick={() => up((s) => { s.length = k; s.form = null; s.lenUser = true; })}>{tx(n)}</button>)}
         <button className={'chip' + (song.fills !== false ? ' on' : '')} onClick={() => up((s) => (s.fills = s.fills === false))}>{tx('Roulements entre sections')}</button>
       </div>
       <div className="hint" style={{ marginBottom: 8 }}>{tx('La chanson complète, dans l’ordre joué : {n} sections · ≈ {d}. Le refrain revient après chaque couplet; déplace, ajoute ou enlève des sections.', { n: form.length, d: `${Math.floor(secs / 60)} min ${String(Math.round(secs % 60)).padStart(2, '0')} s` })}</div>
