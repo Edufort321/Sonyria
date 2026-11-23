@@ -685,7 +685,7 @@ export default function Page() {
   const takes = song.tracks.filter((t) => t.data && (t.take || (!t.back && !t.remix && !t.comp)));
   const compAuto = async () => {
     if (!takes.length) return; setBusy('comp'); await new Promise((r) => setTimeout(r, 40));
-    try { const pick = bestTakes(takes, buildTimeline(song), song); up((s) => (s.comp = { ...(s.comp || {}), ...pick })); say(tx('Sonyria a choisi la meilleure prise pour chaque ligne')); } catch (e) { say(tx('Analyse impossible')); }
+    try { const pick = bestTakes(takes, buildTimeline(song), song); if (!Object.keys(pick).length) { setBusy(''); return say(tx('Aucune prise ne couvre encore une ligne au complet : chante une prise plus longue')); } up((s) => (s.comp = { ...(s.comp || {}), ...pick })); say(tx('Sonyria a choisi la meilleure prise pour chaque ligne')); } catch (e) { say(tx('Analyse impossible')); }
     setBusy('');
   };
   const compBuild = async () => {
