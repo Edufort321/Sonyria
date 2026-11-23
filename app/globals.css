@@ -697,3 +697,21 @@ body:has(.fs) { overflow: hidden; }
 .recp-takes { width: 100%; display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 13px; }
 .recp-takes .mt { display: flex; align-items: center; gap: 6px; }
 .recp-takes small { color: var(--dim); }
+/* plusieurs beats */
+.beats{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.ai-beats{align-self:flex-start}
+.beat-chips .chip small{opacity:.7;margin-left:2px}
+.beat-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.beat-edit .inp{max-width:160px;padding:6px 10px}
+.beat-edit .lbl2{font-size:.8rem;opacity:.7;margin-left:4px}
+.bar-pg{margin-top:2px}
+.beat-secs{display:flex;flex-direction:column;gap:8px}
+.sec-beat{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sec-beat select,.seq-row select{background:var(--card2,#1e1b3a);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:6px 8px;min-width:0;flex:1;max-width:220px}
+.seq-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.seq-row .n{width:20px;opacity:.6;font-size:.8rem}
+.seq-row small{opacity:.7}
+.seq-row .lbl-x{position:static}
+.dur{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.dur input{width:100%}
+.beat-edit .inp{background:rgba(255,255,255,.08);color:inherit;border:1px solid rgba(255,255,255,.18);border-radius:10px}
