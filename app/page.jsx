@@ -3,6 +3,7 @@ import { tx, initLang, setLang, onLang, getLang } from '@/lib/i18n';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as M from '@/lib/music';
 import * as B from '@/lib/beats';
+import { cleanVoice, resample } from '@/lib/denoise';
 import { Engine, buildTimeline, s16, renderOffline, wavBlob, storeToBuffer, VOICE_FX, ECHO_TIMES, pickMime, prepareSamples, kitFor } from '@/lib/engine';
 import { KITS } from '@/lib/samples';
 import { ROLES, ensureLayers, defaultLayers, instName, instIcon, newLayer, REAL, isReal } from '@/lib/arrange';
@@ -22,7 +23,7 @@ import { drawCover, loadCover, saveCover, COVER_FONTS, COVER_LAYOUTS } from '@/l
 import Ic, { IconDefs, Ico } from './Ic';
 import { Splash, Onboarding, AvatarGrid, loadMe, saveMe, avSrc } from './Welcome';
 
-const APP_VERSION = '2026.11.22 · 48';
+const APP_VERSION = '2026.11.22 · 50';
 const isDemo = (t) => { const x = (t || '').trim(); return !!x && (x === DEMO.trim() || x === DEMO_EN.trim()); };
 const DEMO = `[Couplet]
 Sur la route du soir je marche sans bruit
@@ -169,6 +170,7 @@ export default function Page() {
   const [decor, setDecor] = useState('anim');
   const [clipPos, setClipPos] = useState(0);
   const clipPrev = useRef(null);
+  const lyrOn = useRef(-2);
   const [folds, setFolds] = useState({});
   const [guide, setGuide] = useState({ on: false, step: 0 });
   const saveGuide = (g) => { setGuide(g); try { localStorage.setItem('sonyria-guide', JSON.stringify(g)); } catch (e) {} };
@@ -184,6 +186,9 @@ export default function Page() {
   const [micOn, setMicOn] = useState(false);
   const [recT0, setRecT0] = useState(0);
   const [recPanel, setRecPanel] = useState(false);
+  const [musicLv, setMusicLv] = useState(() => { try { const x = localStorage.getItem('sonyria-recmusic'); return x == null ? 1 : +x; } catch (e) { return 1; } });
+  const [voiceOnly, setVoiceOnly] = useState(false);
+  const vpOn = useRef(false);
   const [lastTake, setLastTake] = useState(null);
   const [polish, setPolish] = useState(null);
   const [progress, setProgress] = useState('');
@@ -594,6 +599,7 @@ export default function Page() {
     const newId = 't' + Date.now();
     up((s) => s.tracks.push({ id: newId, name: tx('Prise {n} ({r})', { n: nTake, r: range }), take: true, start: st, buffer, data: buffer.getChannelData(0), sr: buffer.sampleRate, vol: 0.9, pan: 0, fx: 'studio', ...fxParams('studio'), mute: false, solo: false }));
     snapshot(tx('Nouvelle prise de voix'));
+    if (S.current.autoClean !== false) setTimeout(() => cleanTake(newId, true), 250);
     if (recPanelRef.current) setLastTake({ id: newId, dur: buffer.duration }); else setSheet({ type: 'take', id: newId, dur: buffer.duration, next: recMode === 'sec' });
     // sauvegarde tout de suite (pas d'attente) pour ne jamais perdre une prise
     try { const c = S.current; DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (e) {}
@@ -668,6 +674,37 @@ export default function Page() {
     } catch (err) { say(tx('Traitement impossible')); }
     setBusy('');
   };
+  // enlève le bruit ambiant + la musique captée par le micro (garde l'original)
+  const cleanTake = async (id, quiet) => {
+    const t = S.current.tracks.find((x) => x.id === id); if (!t?.data) return;
+    setBusy('clean'); await new Promise((r) => setTimeout(r, 60));
+    try {
+      const e = await ensureAudio();
+      let ref = null;
+      try {
+        const t1 = t.start + t.data.length / t.sr;
+        const mix = await Promise.race([renderOffline({ ...S.current, tracks: [] }, [t.start, t1]), new Promise((_, rj) => setTimeout(() => rj(new Error('long')), 45000))]);
+        const c0 = mix.getChannelData(0), c1 = mix.numberOfChannels > 1 ? mix.getChannelData(1) : c0;
+        const a = 0, len = Math.ceil(t.data.length * mix.sampleRate / t.sr);
+        const mono = new Float32Array(len); for (let i = 0; i < len; i++) mono[i] = ((c0[a + i] || 0) + (c1[a + i] || 0)) / 2;
+        ref = resample(mono, mix.sampleRate, t.sr);
+      } catch (err) {}
+      const src = t.orig || t.data;
+      const out = normalize(cleanVoice(src, t.sr, ref, S.current.cleanStrength ?? 0.8), 0.85);
+      up((s) => { const x = s.tracks.find((y) => y.id === id); if (!x) return; if (!x.orig) { x.orig = x.data; x.origStart = x.start; } x.data = out; x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [out] }); x.fixes = [...(x.fixes || []).filter((f) => f !== 'clean'), 'clean']; x.clean = true; });
+      try { const c = S.current; DB.saveSong({ id: c.id, title: c.title, updated: Date.now(), song: serialize(c) }); } catch (err) {}
+      if (!quiet) say(tx('Voix nettoyée : bruit ambiant et musique retirés'));
+    } catch (err) { say(tx('Nettoyage impossible')); }
+    setBusy('');
+  };
+  useEffect(() => {
+    const e = eng.current; if (!e) return;
+    const lv = !recPanel ? 1 : voiceOnly ? 0 : musicLv;
+    if (e.musicLevel !== lv) { e.musicLevel = lv; e.applyLayers(S.current); }
+    if (voiceOnly && playing) vpOn.current = true;
+    if (voiceOnly && !playing && vpOn.current) { vpOn.current = false; setVoiceOnly(false); }
+  }, [recPanel, musicLv, voiceOnly, playing]); // eslint-disable-line
+  const playVoice = (t) => { setVoiceOnly(true); const e = eng.current; if (e) { e.musicLevel = 0; e.applyLayers(S.current); } playTake(t); };
   const restoreTake = async (t) => {
     const e = await ensureAudio();
     up((s) => { const x = s.tracks.find((y) => y.id === t.id); if (!x?.orig) return; x.data = x.orig; x.start = x.origStart ?? x.start; x.orig = null; x.fixes = []; x.buffer = storeToBuffer(e.ctx, { sr: x.sr, ch: [x.data] }); });
@@ -1609,6 +1646,7 @@ export default function Page() {
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune1')}>{tx('Justesse légère')}</button>
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune2')}>{tx('Justesse forte')}</button>
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'tune3')}>{tx('Effet robot (auto-tune)')}</button>
+                <button className={'chip' + (t.clean ? ' on' : '')} disabled={busy === 'fix' || busy === 'clean'} onClick={() => cleanTake(t.id)}>{busy === 'clean' ? <span className="busy" /> : <Ic n="sparkles" size={14} />} {tx('Isoler ma voix (bruit + musique)')}</button>
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'gate')}>{tx('Nettoyer le bruit')}</button>
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'norm')}>{tx('Volume égal')}</button>
                 <button className="chip" disabled={busy === 'fix'} onClick={() => improve(t, 'fade')}>{tx('Fondus début et fin')}</button>
@@ -1667,12 +1705,30 @@ export default function Page() {
             return <div className="seek">
               <button className="mini" onClick={() => { clipPrev.current = 0; setClipPos(0); if (playing) play({ from: 0 }); }} aria-label={tx('Reprendre au début')}><Ic n="rewind" /></button>
               <button className="mini" onClick={() => seek(clipPos - 5)} aria-label="-5 s">−5</button>
-              <button className="mini pp" onClick={() => (playing ? stop() : play({ from: (clipPrev.current ?? 0) / (16 * s16(song.bpm)) }))} aria-label={tx('Lecture')}>{playing ? <Ic n="pause" /> : <Ic n="play" />}</button>
+              <button className="mini pp" onClick={() => { if (playing) { const st = eng.current?.songTime?.(); clipPrev.current = st && !st.countIn ? st.t : clipPos; stop(); } else play({ from: (clipPrev.current ?? 0) / (16 * s16(song.bpm)) }); }} aria-label={tx('Lecture')}>{playing ? <Ic n="pause" /> : <Ic n="play" />}</button>
               <button className="mini" onClick={() => seek(clipPos + 5)} aria-label="+5 s">+5</button>
               <input type="range" min="0" max={Math.max(1, total)} step="0.1" value={Math.min(clipPos, total)} onChange={(e) => { const x = +e.target.value; clipPrev.current = x; setClipPos(x); }} onPointerUp={(e) => seek(+e.currentTarget.value)} onKeyUp={(e) => seek(+e.currentTarget.value)} />
               <span className="seek-t">{fmt(clipPos)} / {fmt(total)}</span>
             </div>;
           })()}
+          {(() => {
+            const d16 = s16(song.bpm), L = tl.lines.map((l) => ({ l, t: (l.syl?.length ? l.syl[0].g : l.b0 * 16) * d16 }));
+            let on = -1; L.forEach((x, i) => { if (x.t <= clipPos + 0.15) on = i; });
+            const seekTo = (x) => { const tt = Math.max(0, x - 0.3); clipPrev.current = tt; setClipPos(tt); if (playing) play({ from: tt / (16 * d16) }); };
+            const fmt = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
+            if (!L.length) return null;
+            return <div className="clip-lyr" ref={(el) => { if (!el || lyrOn.current === on) return; lyrOn.current = on; const c = el.querySelector('.on'); if (c) el.scrollTo({ top: c.offsetTop - el.clientHeight / 3, behavior: 'smooth' }); }}>
+              {L.map((x, i) => <div key={i}>
+                {(x.l.first || i === 0) && <div className="cl-sec">{x.l.label}</div>}
+                <button className={'cl-line' + (i === on ? ' on' : i < on ? ' past' : '') + (x.l.inst ? ' inst' : '')} onClick={() => seekTo(x.t)}><span className="cl-t">{fmt(x.t)}</span>{x.l.text}</button>
+              </div>)}
+            </div>;
+          })()}
+          <Sub k="clip-arr" t={tx('Arrangement et durée de la chanson')}>
+            <button className="btn sm ai" onClick={() => { let d; up((s) => { d = planSong(s, true); }); if (d) say(tx('Arrangement complet créé : {d} selon tes paroles. Modifie-le à ton goût dans Beat et Mélodie.', { d: fmtDur(d) })); }}><Ic n="sparkles" /> {tx('IA : arrangement complet selon mes paroles')}</button>
+            <div style={{ height: 8 }} />
+            {chainEl}
+          </Sub>
           <Sub k="clip-vid" t={tx('Ma vidéo : me filmer ou importer un clip')} open>
           <div className="vid-src">
             <button className="btn pri" onClick={() => setCam(true)}><Ico n="rec-button" s={22} /> {tx('Me filmer')}</button>
@@ -1786,7 +1842,7 @@ export default function Page() {
       </div></div>
 
       {rec && !recPanel && <div className={"rec-console" + (kara ? " on-kara" : "")}><MicMeter eng={eng} rec compact t0={recT0} /><button className="btn sm" onClick={finishRec}>■ {tx('Arrêter')}</button></div>}
-      {recPanel && <RecPanel song={song} tl={tl} eng={eng} rec={rec} micOn={micOn} recT0={recT0} sections={sections} recMode={recMode} setRecMode={setRecMode} recFrom={recFrom} setRecFrom={setRecFrom} recTo={recTo} setRecTo={setRecTo}
+      {recPanel && <RecPanel musicLv={musicLv} setMusicLv={(v) => { setMusicLv(v); try { localStorage.setItem('sonyria-recmusic', v); } catch (e) {} }} playVoice={playVoice} cleaning={busy === 'clean'} cleanTake={cleanTake} sectionsAll={sections} song={song} tl={tl} eng={eng} rec={rec} micOn={micOn} recT0={recT0} sections={sections} recMode={recMode} setRecMode={setRecMode} recFrom={recFrom} setRecFrom={setRecFrom} recTo={recTo} setRecTo={setRecTo}
         up={up} startRec={startRec} finishRec={finishRec} takes={takes} lastTake={lastTake} setLastTake={setLastTake} playTake={playTake} delTake={delTake} fmtDur={fmtDur}
         onClose={() => { if (rec) finishRec(); setRecPanel(false); }} goStudio={() => { setRecPanel(false); setTab('studio'); }} />}
       {cam && <CamStudio song={song} tl={tl} eng={eng} ensureAudio={ensureAudio} play={play} stop={() => { eng.current?.stop(); setPlaying(false); }} onDone={onFilmed} onClose={() => setCam(false)} scenario={scenario} photos={() => photos.current} onPhotos={async (files) => { photos.current = (await Promise.all(files.slice(0, 12).map(loadImage))).filter(Boolean); bump(); }} />}
@@ -2244,7 +2300,7 @@ function OnTop({ song, up }) {
 }
 
 // studio d'enregistrement : UN seul endroit (micro en bas) — test du son, quoi enregistrer, décompte, paroles, prises
-function RecPanel({ song, tl, eng, rec, micOn, recT0, sections, recMode, setRecMode, recFrom, setRecFrom, recTo, setRecTo, up, startRec, finishRec, takes, lastTake, setLastTake, playTake, delTake, fmtDur, onClose, goStudio }) {
+function RecPanel({ musicLv, setMusicLv, playVoice, cleaning, cleanTake, sectionsAll, song, tl, eng, rec, micOn, recT0, sections, recMode, setRecMode, recFrom, setRecFrom, recTo, setRecTo, up, startRec, finishRec, takes, lastTake, setLastTake, playTake, delTake, fmtDur, onClose, goStudio }) {
   const [st, setSt] = useState(null);
   useEffect(() => { let raf; const f = () => { setSt(eng.current?.songTime() || null); raf = requestAnimationFrame(f); }; f(); return () => cancelAnimationFrame(raf); }, [eng]);
   const counting = rec && st?.countIn;
@@ -2252,6 +2308,24 @@ function RecPanel({ song, tl, eng, rec, micOn, recT0, sections, recMode, setRecM
   const cur = act ? tl.lines[act.idx] : null, nxt = act ? tl.lines[act.idx + 1] : tl.lines.find((l) => l.b0 >= recFrom);
   const lt = lastTake && song.tracks.find((t) => t.id === lastTake.id);
   const nextSec = recMode === 'sec' && recTo != null ? sections[sections.findIndex((x) => x.to === recTo) + 1] : null;
+  const lyrBox = useRef(null), lastOn = useRef(-2);
+  const nowT = st && !st.countIn ? st.t : null;
+  const onIdx = nowT != null ? (currentLine(tl, song, nowT)?.idx ?? -1) : -1;
+  useEffect(() => { const el = lyrBox.current; if (!el || lastOn.current === onIdx) return; lastOn.current = onIdx; const c = el.querySelector('.on'); if (c) el.scrollTo({ top: c.offsetTop - el.clientHeight / 3, behavior: 'smooth' }); }, [onIdx]);
+  const pickLine = (l) => { const sec = sections.find((x) => x.from <= l.b0 && l.b0 < x.to); setRecMode('sec'); setRecFrom(l.b0); setRecTo(sec ? sec.to : null); };
+  const lyricsList = tl.lines.length ? <div className="clip-lyr recp-all" ref={lyrBox}>
+    {tl.lines.map((l, i) => <div key={i}>
+      {(l.first || i === 0) && <div className="cl-sec">{l.label}</div>}
+      <button className={'cl-line' + (i === onIdx ? ' on' : onIdx >= 0 && i < onIdx ? ' past' : '') + (l.inst ? ' inst' : '') + (!rec && recMode === 'sec' && l.b0 >= recFrom && (recTo == null || l.b0 < recTo) ? ' sel' : '')} onClick={() => !rec && pickLine(l)}><span className="cl-t">{M.localLabel(l.label).slice(0, 1)}</span>{l.text}</button>
+    </div>)}
+  </div> : <div className="hint">{tx('Écris tes paroles dans l’onglet Paroles pour les voir ici.')}</div>;
+  const mixEl = <div className="recp-mix">
+    <label><span className="rm-h"><Ic n="music" size={14} /> {tx('Volume de la musique (pour mieux entendre ta voix)')} <b>{Math.round(musicLv * 100)} %</b></span>
+      <input type="range" min="0" max="1" step="0.05" value={musicLv} onChange={(ev) => setMusicLv(+ev.target.value)} /></label>
+    <div className="chips">
+      <button className={'chip' + (song.autoClean !== false ? ' on' : '')} onClick={() => up((s) => (s.autoClean = s.autoClean === false))}><Ic n="sparkles" size={14} /> {tx('Isoler ma voix automatiquement')}</button>
+    </div>
+  </div>;
   return <div className="recp">
     <div className="recp-top">
       <b>{rec ? <><span className="rec-dot" /> {tx('Enregistrement en cours')}</> : tx('Enregistrer ma voix')}</b>
@@ -2265,10 +2339,16 @@ function RecPanel({ song, tl, eng, rec, micOn, recT0, sections, recMode, setRecM
           {cur ? <b>{cur.text}</b> : <span className="hint">{tx('Intro…')}</span>}
           {nxt && <small>{nxt.text}</small>}
         </>}
+        {lyricsList}
+        {mixEl}
       </div> : lastTake && lt ? <div className="take-ok" style={{ marginTop: 12 }}>
         <b>✓ {lt.name}</b><small>{fmtDur(lastTake.dur)} · {tx('sauvegardée dans ta chanson')}</small>
         <div className="take-acts" style={{ marginTop: 8 }}>
-          <button className="btn pri wide" onClick={() => playTake(lt)}><Ic n="play" /> {tx('Écouter ma prise')}</button>
+          {cleaning && <div className="hint"><span className="busy" /> {tx('J’isole ta voix : bruit ambiant et musique retirés…')}</div>}
+          <button className="btn pri wide" onClick={() => playTake(lt)}><Ic n="play" /> {tx('Écouter ma prise avec la musique')}</button>
+          <button className="btn wide" onClick={() => playVoice(lt)}><Ic n="mic" /> {tx('Écouter ma voix seule')}</button>
+          {!cleaning && <button className={'btn wide' + (lt.clean ? '' : ' ai')} onClick={() => cleanTake(lt.id)}><Ic n="sparkles" /> {lt.clean ? tx('Voix isolée ✓ — refaire le nettoyage') : tx('Isoler ma voix (enlever bruit + musique)')}</button>}
+          {mixEl}
           {nextSec && <button className="btn wide" onClick={() => { setLastTake(null); startRec(); }}><Ico n="record" s={20} /> {tx('Enregistrer la section suivante')} ({M.localLabel(nextSec.label)})</button>}
           <button className="btn wide" onClick={() => { setLastTake(null); startRec(); }}><Ico n="record" s={20} /> {tx('Faire une autre prise (on garde celle-ci)')}</button>
           <button className="btn wide" onClick={() => { up((s) => { s.tracks = s.tracks.filter((x) => x.id !== lt.id); }); setLastTake(null); startRec(); }}><Ic n="undo" /> {tx('Refaire : effacer celle-ci et recommencer')}</button>
@@ -2283,7 +2363,9 @@ function RecPanel({ song, tl, eng, rec, micOn, recT0, sections, recMode, setRecM
           <button className={'chip' + (song.countIn ? ' on' : '')} onClick={() => up((s) => (s.countIn = !s.countIn))}>{tx('Décompte 1-2-3-4')}</button>
           <button className={'chip' + (song.guide ? ' on' : '')} onClick={() => up((s) => (s.guide = !s.guide))}>{tx('Mélodie guide')}</button>
         </div>
-        <div className="hint" style={{ marginTop: 6 }}>{tx('Mets des écouteurs : la musique ne s’enregistre pas dans le micro et ta voix reste claire.')}</div>
+        {mixEl}
+        <div className="hint" style={{ marginTop: 6 }}>{tx('Touche une ligne pour commencer à partir de là. Avec des écouteurs, c’est le plus propre; sinon, Sonyria retire la musique et le bruit de ta prise.')}</div>
+        {lyricsList}
       </>}
     </div>
     <div className="recp-bot">

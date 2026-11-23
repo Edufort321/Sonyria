@@ -715,3 +715,20 @@ body:has(.fs) { overflow: hidden; }
 .dur{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .dur input{width:100%}
 .beat-edit .inp{background:rgba(255,255,255,.08);color:inherit;border:1px solid rgba(255,255,255,.18);border-radius:10px}
+/* paroles à suivre dans Clip */
+.clip-lyr{max-height:230px;overflow-y:auto;margin:10px 0;padding:6px 8px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);position:relative;scroll-behavior:smooth}
+.cl-sec{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin:8px 0 2px}
+.cl-line{display:flex;gap:8px;align-items:baseline;width:100%;text-align:left;background:none;border:0;color:inherit;padding:5px 6px;border-radius:9px;font-size:.95rem;opacity:.8;cursor:pointer}
+.cl-line .cl-t{font-size:.7rem;opacity:.5;min-width:30px;font-variant-numeric:tabular-nums}
+.cl-line.past{opacity:.4}
+.cl-line.inst{font-style:italic;opacity:.55}
+.cl-line.on{opacity:1;background:linear-gradient(90deg,rgba(124,92,255,.35),rgba(34,211,238,.18));font-weight:700;font-size:1.05rem}
+/* micro : paroles complètes + volume musique */
+.recp-all{max-height:34vh;margin-top:10px}
+.cl-line.sel{background:rgba(239,68,68,.14);opacity:1}
+.recp-mix{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.recp-mix label{display:flex;flex-direction:column;gap:4px;font-size:.85rem}
+.recp-mix input[type=range]{width:100%}
+.recp-lyr{display:flex;flex-direction:column}
+.recp-mix .rm-h{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.recp-mix .rm-h b{margin-left:auto}
